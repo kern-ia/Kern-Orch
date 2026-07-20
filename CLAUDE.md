@@ -4,7 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-This repository is at the **design stage**. It currently contains only `harnais-agentique-CDC-v2.md` (a French cahier des charges) — no Go code, no `go.mod`, no build tooling, and no git repo yet. There are therefore no build/lint/test commands to run until the module is scaffolded. When implementation starts, the target stack is **Go 1.22+** with **Cobra** (CLI) and **`modernc.org/sqlite`** (pure-Go SQLite, no cgo). The spec is written in French; keep design discussion consistent with it.
+Bootstrapped (Phase 2 done, `feature/bootstrap`). The harness is a **Go 1.26** module (`github.com/yoann/kern-orch`) using **Cobra** (CLI) and **`modernc.org/sqlite`** (pure-Go, no cgo). The Cobra command tree exists with stubbed subcommands (`run`/`resume`/`status`/`list-skills` return `not implemented yet`); the graph engine, agentrunner, checkpoint store, and skills registry are not built yet. The design spec `harnais-agentique-CDC-v2.md` is in French; keep design discussion consistent with it.
+
+## Commands
+
+- Build: `go build ./...`
+- Vet: `go vet ./...`
+- Test all: `go test ./...`
+- Single package: `go test ./internal/cmd/`
+- Single test: `go test ./internal/cmd/ -run TestRootHasExpectedSubcommands -v`
+- Run CLI: `go run . <command>` (e.g. `go run . --help`, `go run . list-skills`)
+
+## Workflow (greenfield-tdd-okf skill)
+
+Git-flow: `main` (stable jalons) ← `dev` ← one branch per feature. **Merge `--no-ff` to `dev` only when tests are green + build passes + E2E done. Never commit directly to `main`/`dev`.** Each feature: write tests first on pure logic in the engine/services, then wire thin orchestration; write an OKF fiche in `docs/index/<n>-<feature>.md` (template in `.claude/skills/greenfield-tdd-okf/references/okf-fiche-template.md`, body ≤15 lines, dated decisions); log pitfalls in `retro.md` when they bite. Generic pitfalls also go back into the skill's `references/pieges.md`.
 
 ## What is being built
 

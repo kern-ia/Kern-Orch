@@ -1,0 +1,21 @@
+# Binaries
+/kern-orch
+*.exe
+/bin/
+
+# Test & coverage
+*.out
+coverage.*
+
+# Local runtime state (SQLite checkpoints)
+*.db
+*.db-shm
+*.db-wal
+/data/
+
+# Env & secrets
+.env
+.env.local
+
+# OS
+.DS_Store
