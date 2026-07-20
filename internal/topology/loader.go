@@ -46,6 +46,7 @@ type nodeSpec struct {
 	Func   string `yaml:"func"`
 	Skill  string `yaml:"skill"`
 	Prompt string `yaml:"prompt"`
+	Graph  string `yaml:"graph"` // subgraph nodes: path to the nested graph file
 }
 
 type edgeSpec struct {
@@ -60,8 +61,20 @@ type spec struct {
 	Edges []edgeSpec `yaml:"edges"`
 }
 
-// Load parses YAML and builds a graph, resolving func/router/skill references against reg.
+// subResolver turns a subgraph node's file reference into a built nested graph.
+type subResolver func(nodeID, ref string) (*graph.Graph, error)
+
+// Load parses YAML and builds a graph from inline definitions. Subgraph nodes are not
+// supported here (they need file resolution) — use LoadFile for graphs with subgraphs.
 func Load(data []byte, reg *Registry) (*graph.Graph, error) {
+	noSub := func(nodeID, _ string) (*graph.Graph, error) {
+		return nil, fmt.Errorf("topology: node %q is a subgraph; load via a file with LoadFile", nodeID)
+	}
+	return build(data, reg, noSub)
+}
+
+// build parses YAML and assembles the graph, delegating subgraph resolution to resolveSub.
+func build(data []byte, reg *Registry, resolveSub subResolver) (*graph.Graph, error) {
 	var sp spec
 	if err := yaml.Unmarshal(data, &sp); err != nil {
 		return nil, fmt.Errorf("topology: parse yaml: %w", err)
@@ -87,8 +100,17 @@ func Load(data []byte, reg *Registry) (*graph.Graph, error) {
 				return nil, fmt.Errorf("topology: node %q is an agent but no runner is configured", n.ID)
 			}
 			g.AddNode(graph.NewAgentNode(n.ID, n.Prompt, reg.runner))
+		case "subgraph":
+			if n.Graph == "" {
+				return nil, fmt.Errorf("topology: subgraph node %q missing `graph` file reference", n.ID)
+			}
+			sub, err := resolveSub(n.ID, n.Graph)
+			if err != nil {
+				return nil, err
+			}
+			g.AddNode(graph.NewSubgraphNode(n.ID, sub))
 		default:
-			return nil, fmt.Errorf("topology: node %q: invalid type %q (want tool|agent)", n.ID, n.Type)
+			return nil, fmt.Errorf("topology: node %q: invalid type %q (want tool|agent|subgraph)", n.ID, n.Type)
 		}
 	}
 

@@ -1,0 +1,7 @@
+# Child graph used as a sub-agent by examples/parent.yaml.
+# Runs with its own state (seeded from the parent) and its result bubbles back up.
+entry: work
+nodes:
+  - id: work
+    type: tool
+    func: double

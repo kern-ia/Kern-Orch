@@ -29,3 +29,10 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
   2. resume redemande le chemin YAML (non persisté dans le checkpoint) — envisager de le stocker.
   3. builtinRegistry ne fournit que `noop` — les projets enregistrent leurs tools/routers en Go.
   4. modernc.org/sqlite : ouvrir avec PRAGMA busy_timeout/WAL si accès concurrent multi-run un jour.
+
+## 2026-07-20 — Sous-graphes (v0.2.0)
+- Dernier concept LangGraph manquant (§3) livré : SubgraphNode + `type: subgraph` YAML via
+  topology.LoadFile (résolution fichier récursive + garde anti-cycle). Portage §3 désormais complet.
+- Garde récursion : set "in-progress" par chemin absolu, supprimé au retour → cycle a→b→a détecté,
+  réutilisation DAG d'un même fichier autorisée.
+- Reste ouvert et inchangé : contrat §6.4 (CLI collègue), resume redemande le YAML.
