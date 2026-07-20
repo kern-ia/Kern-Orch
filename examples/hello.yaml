@@ -1,0 +1,15 @@
+# Minimal example graph. Run with: kern-orch run examples/hello.yaml
+# The agent node uses the external LLM CLI when KERN_AGENT_CLI is set, otherwise the
+# deterministic stub (so this runs with no configuration).
+entry: greet
+nodes:
+  - id: greet
+    type: agent
+    skill: planner
+    prompt: "Say hello to the operator"
+  - id: finish
+    type: tool
+    func: noop
+edges:
+  - from: greet
+    to: [finish]
