@@ -13,6 +13,15 @@ stack du projet en cours — inutile de charger le reste en contexte.
 - Rendre en headless une page protégée : jeton court (JWT) lié au chemin, autorisé dans le proxy.
 - Intl fr-FR : séparateurs = espaces insécables ; comparer via le formateur, pas une chaîne écrite.
 
+## Go (2026-07, projet Kern-Orch)
+- Typed-nil : un pointeur nil typé (ex. `(*bytes.Buffer)(nil)`) rangé dans un champ
+  `io.Writer`/interface produit une interface NON nil → tout garde `if w == nil` échoue et
+  déréférence → panic. N'assigner un pointeur à un champ interface que s'il est non-nil.
+- Subprocess streaming : tester le vrai chemin avec un process externe réel (script sh dans
+  `t.TempDir()`) en plus du pattern `TestHelperProcess` (`GO_WANT_HELPER_PROCESS=1`).
+- Fan-out concurrent : donner un `Clone()` du state à chaque branche, merger sur une seule
+  goroutine dans un ordre stable ; valider avec `go test -race`.
+
 ## Next 16 / TypeScript (2026-07, projet CRM_TEAM)
 - npm workspaces + `exports` + `turbopack.root` pour un package TS partagé.
 - jose/crypto sous vitest jsdom → `// @vitest-environment node` sur les tests de services.
