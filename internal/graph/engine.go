@@ -69,7 +69,20 @@ const defaultMaxSteps = 10_000
 type Engine struct {
 	g        *Graph
 	maxSteps int
+	onStep   StepFunc
 }
+
+// StepInfo describes the graph's position after a level completes: the next frontier
+// to execute (empty when the run is finished) and the running step count.
+type StepInfo struct {
+	Step     int
+	Frontier []string
+}
+
+// StepFunc is called after every executed level with the merged state and the next
+// frontier. It is the seam the checkpoint store hooks into; the graph package stays
+// unaware of persistence. Returning an error aborts the run.
+type StepFunc func(ctx context.Context, info StepInfo, s *State) error
 
 // NewEngine builds an engine for the graph.
 func NewEngine(g *Graph) *Engine {
@@ -82,13 +95,24 @@ func (e *Engine) WithMaxSteps(n int) *Engine {
 	return e
 }
 
-// Run executes the graph, mutating s in place. It stops when the frontier empties or
-// ctx is cancelled, and errors if the step budget is exhausted (cycle guard).
+// OnStep registers a hook invoked after each level (see StepFunc).
+func (e *Engine) OnStep(f StepFunc) *Engine {
+	e.onStep = f
+	return e
+}
+
+// Run executes the graph from its entry node, mutating s in place.
 func (e *Engine) Run(ctx context.Context, s *State) error {
+	return e.RunFrom(ctx, s, []string{e.g.entry})
+}
+
+// RunFrom executes the graph starting from an arbitrary frontier — used by resume to
+// continue from a checkpoint. It stops when the frontier empties or ctx is cancelled,
+// and errors if the step budget is exhausted (cycle guard).
+func (e *Engine) RunFrom(ctx context.Context, s *State, frontier []string) error {
 	if err := e.g.Validate(); err != nil {
 		return err
 	}
-	frontier := []string{e.g.entry}
 	for level := 0; len(frontier) > 0; level++ {
 		if level >= e.maxSteps {
 			return fmt.Errorf("graph: step budget %d exhausted (cycle?)", e.maxSteps)
@@ -99,6 +123,11 @@ func (e *Engine) Run(ctx context.Context, s *State) error {
 		next, err := e.runLevel(ctx, s, frontier)
 		if err != nil {
 			return err
+		}
+		if e.onStep != nil {
+			if err := e.onStep(ctx, StepInfo{Step: s.Step, Frontier: next}, s); err != nil {
+				return err
+			}
 		}
 		frontier = next
 	}
