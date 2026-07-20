@@ -4,7 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Bootstrapped (Phase 2 done, `feature/bootstrap`). The harness is a **Go 1.26** module (`github.com/yoann/kern-orch`) using **Cobra** (CLI) and **`modernc.org/sqlite`** (pure-Go, no cgo). The Cobra command tree exists with stubbed subcommands (`run`/`resume`/`status`/`list-skills` return `not implemented yet`); the graph engine, agentrunner, checkpoint store, and skills registry are not built yet. The design spec `harnais-agentique-CDC-v2.md` is in French; keep design discussion consistent with it.
+Functional end-to-end. The harness is a **Go 1.26** module (`github.com/yoann/kern-orch`) using **Cobra** (CLI), **`modernc.org/sqlite`** (pure-Go, no cgo), and **`gopkg.in/yaml.v3`**. All six planned features are built and merged to `dev`: graph engine (`internal/graph`), agent runner (`internal/agentrunner`), checkpoint store + resume (`internal/checkpoint`), skills registry (`internal/skills`), YAML topology loader (`internal/topology`), config (`internal/config`), and the wired CLI (`internal/cmd`). `run`/`resume`/`status`/`list-skills` all work; see `examples/hello.yaml`. The design spec `harnais-agentique-CDC-v2.md` is in French; keep design discussion consistent with it.
+
+### How the pieces fit
+`cmd` reads `config` (env) → builds an `AgentRunner` (`agentrunner.Subprocess` if `KERN_AGENT_CLI` is set, else `agentrunner.Stub`) → `topology.Load` turns a YAML graph into a `graph.Graph`, resolving `tool`/`router` names against a `topology.Registry` of Go funcs and backing `agent` nodes with the runner → `graph.Engine` runs it level-synchronously, calling an `OnStep` hook that persists each level to the `checkpoint` store. `resume` reloads the latest checkpoint and calls `Engine.RunFrom`. Dependency direction: `graph` defines the `AgentRunner` port and the `StepFunc` hook; `agentrunner` and `checkpoint` depend on `graph`, never the reverse.
+
+### Provisional / to reconcile
+The `agentrunner` JSON-lines protocol (`internal/agentrunner/protocol.go`) is a **placeholder** for spec §6.4 — reconcile with the real multi-provider CLI once accessible. The `topology.Registry` ships only a `noop` builtin tool; real projects register their own tool/router funcs in Go.
 
 ## Commands
 

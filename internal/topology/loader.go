@@ -1,0 +1,116 @@
+// Package topology loads a declarative YAML graph description into a graph.Graph. It
+// realizes the hybrid model (spec §6.1): the YAML declares the topology while tool and
+// router functions are Go code registered by name in a Registry, and agent nodes are
+// backed by a graph.AgentRunner.
+package topology
+
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/yoann/kern-orch/internal/graph"
+)
+
+// Registry maps the names referenced in YAML to Go implementations.
+type Registry struct {
+	tools   map[string]graph.ToolFunc
+	routers map[string]graph.RouteFunc
+	runner  graph.AgentRunner
+}
+
+// NewRegistry creates a registry; runner may be nil if the graph has no agent nodes.
+func NewRegistry(runner graph.AgentRunner) *Registry {
+	return &Registry{
+		tools:   make(map[string]graph.ToolFunc),
+		routers: make(map[string]graph.RouteFunc),
+		runner:  runner,
+	}
+}
+
+// Tool registers a tool function under name.
+func (r *Registry) Tool(name string, fn graph.ToolFunc) *Registry {
+	r.tools[name] = fn
+	return r
+}
+
+// Router registers a conditional routing function under name.
+func (r *Registry) Router(name string, fn graph.RouteFunc) *Registry {
+	r.routers[name] = fn
+	return r
+}
+
+type nodeSpec struct {
+	ID     string `yaml:"id"`
+	Type   string `yaml:"type"`
+	Func   string `yaml:"func"`
+	Skill  string `yaml:"skill"`
+	Prompt string `yaml:"prompt"`
+}
+
+type edgeSpec struct {
+	From   string   `yaml:"from"`
+	To     []string `yaml:"to"`
+	Router string   `yaml:"router"`
+}
+
+type spec struct {
+	Entry string     `yaml:"entry"`
+	Nodes []nodeSpec `yaml:"nodes"`
+	Edges []edgeSpec `yaml:"edges"`
+}
+
+// Load parses YAML and builds a graph, resolving func/router/skill references against reg.
+func Load(data []byte, reg *Registry) (*graph.Graph, error) {
+	var sp spec
+	if err := yaml.Unmarshal(data, &sp); err != nil {
+		return nil, fmt.Errorf("topology: parse yaml: %w", err)
+	}
+	if sp.Entry == "" {
+		return nil, fmt.Errorf("topology: no entry declared")
+	}
+
+	g := graph.NewGraph().SetEntry(sp.Entry)
+	for _, n := range sp.Nodes {
+		if n.ID == "" {
+			return nil, fmt.Errorf("topology: node with empty id")
+		}
+		switch n.Type {
+		case "tool":
+			fn, ok := reg.tools[n.Func]
+			if !ok {
+				return nil, fmt.Errorf("topology: node %q: unknown tool func %q", n.ID, n.Func)
+			}
+			g.AddNode(graph.NewToolNode(n.ID, fn))
+		case "agent":
+			if reg.runner == nil {
+				return nil, fmt.Errorf("topology: node %q is an agent but no runner is configured", n.ID)
+			}
+			g.AddNode(graph.NewAgentNode(n.ID, n.Prompt, reg.runner))
+		default:
+			return nil, fmt.Errorf("topology: node %q: invalid type %q (want tool|agent)", n.ID, n.Type)
+		}
+	}
+
+	for _, e := range sp.Edges {
+		switch {
+		case len(e.To) > 0 && e.Router != "":
+			return nil, fmt.Errorf("topology: edge from %q has both `to` and `router`", e.From)
+		case e.Router != "":
+			route, ok := reg.routers[e.Router]
+			if !ok {
+				return nil, fmt.Errorf("topology: edge from %q: unknown router %q", e.From, e.Router)
+			}
+			g.AddEdge(e.From, route)
+		case len(e.To) > 0:
+			g.AddEdge(e.From, graph.Static(e.To...))
+		default:
+			return nil, fmt.Errorf("topology: edge from %q has neither `to` nor `router`", e.From)
+		}
+	}
+
+	if err := g.Validate(); err != nil {
+		return nil, err
+	}
+	return g, nil
+}
