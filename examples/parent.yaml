@@ -1,0 +1,13 @@
+# Subgraph example. Run with: kern-orch run examples/parent.yaml
+# prep seeds n=3, then the `nested` sub-agent runs examples/child.yaml which doubles it.
+entry: prep
+nodes:
+  - id: prep
+    type: tool
+    func: seed
+  - id: nested
+    type: subgraph
+    graph: child.yaml
+edges:
+  - from: prep
+    to: [nested]
