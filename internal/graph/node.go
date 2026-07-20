@@ -10,6 +10,8 @@ const (
 	KindTool Kind = iota
 	// KindAgent is a node that delegates to an AgentRunner (the external LLM CLI).
 	KindAgent
+	// KindSubgraph is a node that runs a nested graph (a sub-agent) with its own state.
+	KindSubgraph
 )
 
 // Node is a single unit of work in the graph. Execute mutates the shared state in

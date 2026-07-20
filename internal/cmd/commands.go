@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -20,12 +19,8 @@ func newRunCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := config.FromEnv()
-			data, err := os.ReadFile(args[0])
-			if err != nil {
-				return err
-			}
 			runner := newRunner(cfg)
-			g, err := topology.Load(data, builtinRegistry(runner))
+			g, err := topology.LoadFile(args[0], builtinRegistry(runner))
 			if err != nil {
 				return err
 			}
@@ -75,11 +70,7 @@ func newResumeCmd() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "run %s already complete\n", runID)
 				return nil
 			}
-			data, err := os.ReadFile(graphPath)
-			if err != nil {
-				return err
-			}
-			g, err := topology.Load(data, builtinRegistry(newRunner(cfg)))
+			g, err := topology.LoadFile(graphPath, builtinRegistry(newRunner(cfg)))
 			if err != nil {
 				return err
 			}

@@ -9,6 +9,9 @@ Functional end-to-end. The harness is a **Go 1.26** module (`github.com/yoann/ke
 ### How the pieces fit
 `cmd` reads `config` (env) → builds an `AgentRunner` (`agentrunner.Subprocess` if `KERN_AGENT_CLI` is set, else `agentrunner.Stub`) → `topology.Load` turns a YAML graph into a `graph.Graph`, resolving `tool`/`router` names against a `topology.Registry` of Go funcs and backing `agent` nodes with the runner → `graph.Engine` runs it level-synchronously, calling an `OnStep` hook that persists each level to the `checkpoint` store. `resume` reloads the latest checkpoint and calls `Engine.RunFrom`. Dependency direction: `graph` defines the `AgentRunner` port and the `StepFunc` hook; `agentrunner` and `checkpoint` depend on `graph`, never the reverse.
 
+### Subgraphs (sub-agents, spec §3)
+A node can run a nested graph: `graph.SubgraphNode` runs a child `Graph` with its own state (seeded from the parent via `WithInput`, default Clone; result merged back via `WithOutput`, default Merge). From the parent's checkpoint view the whole sub-run is one atomic step (spec §6.3 = checkpoint at sub-graph boundaries). In YAML: `type: subgraph` with a `graph: <file>` reference — loaded by `topology.LoadFile` (recursion-guarded). `Load([]byte)` rejects subgraph nodes, so `run`/`resume` use `LoadFile`. See `examples/parent.yaml` → `examples/child.yaml`.
+
 ### Provisional / to reconcile
 The `agentrunner` JSON-lines protocol (`internal/agentrunner/protocol.go`) is a **placeholder** for spec §6.4 — reconcile with the real multi-provider CLI once accessible. The `topology.Registry` ships only a `noop` builtin tool; real projects register their own tool/router funcs in Go.
 

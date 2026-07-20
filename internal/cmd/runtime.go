@@ -30,6 +30,20 @@ func newRunner(cfg config.Config) graph.AgentRunner {
 func builtinRegistry(runner graph.AgentRunner) *topology.Registry {
 	reg := topology.NewRegistry(runner)
 	reg.Tool("noop", func(context.Context, *graph.State) error { return nil })
+	// double: demo tool for the subgraph example — multiplies state key "n" by 2.
+	reg.Tool("double", func(_ context.Context, s *graph.State) error {
+		if v, ok := s.Get("n"); ok {
+			if iv, ok := v.(int); ok {
+				s.Set("n", iv*2)
+			}
+		}
+		return nil
+	})
+	// seed: demo tool that initializes state key "n" to 3.
+	reg.Tool("seed", func(_ context.Context, s *graph.State) error {
+		s.Set("n", 3)
+		return nil
+	})
 	return reg
 }
 
