@@ -148,11 +148,19 @@ Rôle : scorer les échanges (qualité/dérive) en asynchrone, émettre des aler
 
 ### ⬜ EPIC-11 · Observation (Watcher + Analyseur déclaré vs observé)
 Rôle : signaux temps réel + comparaison *ce qui était déclaré* vs *ce qui est réellement fait*.
+**Décision** : **OpenTelemetry (conventions GenAI)** émis en Go + backend OSS pluggable via OTLP
+(défaut **Langfuse** self-host MIT, ou **Phoenix**). **LangSmith écarté** (propriétaire, non
+souverain, Python/JS-first, cher). On n'écrit pas de plateforme. → voir `OBSERVABILITY.md`.
 - [x] Embryon : checkpoints + `status`
-- [ ] Watcher temps réel (event bus des runs) **M**
-- [ ] Analyseur « déclaré vs observé » (plan attendu vs trace réelle) **L**
+- [ ] Instrumentation OTel Go : span racine par run (trace = runID), span par nœud (hook
+  `StepFunc`), span `gen_ai.*` par appel LLM (`agentrunner`) **S–M**
+- [ ] Exporter OTLP pluggable via env (défaut off = no-op, comme le Stub) **S**
+- [ ] Analyseur « déclaré vs observé » : topologie du graphe (déclaré) vs trace OTel (observé) —
+  **notre valeur ajoutée**, pas fourni par les backends **M–L**
+- [ ] Watcher temps réel = reader/exporter sur le flux de spans **M**
 - [ ] Boucle de feedback vers le Canal de pilotage **M**
-- Dépendances : EPIC-01 ; alimente EPIC-05, EPIC-10.
+- Dépendances : EPIC-01 ; épingler une version des semconv GenAI (statut « Development »).
+  Alimente EPIC-05, EPIC-10 (le Scorer sémantique consomme les mêmes spans).
 
 ### 🔌 EPIC-12 · Briques externes
 - UI, Credentials vault (hors corps), Providers LLM — hors de ce repo. Contrats
