@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 	state      TEXT    NOT NULL,
 	status     TEXT    NOT NULL,
 	created_at TEXT    NOT NULL,
+	graph_path TEXT    NOT NULL DEFAULT '',
 	PRIMARY KEY (run_id, step)
 );`
 
@@ -59,12 +60,12 @@ func (s *SQLiteStore) Save(ctx context.Context, r Record) error {
 		created = time.Now().UTC()
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO checkpoints (run_id, step, frontier, state, status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
+		`INSERT INTO checkpoints (run_id, step, frontier, state, status, created_at, graph_path)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(run_id, step) DO UPDATE SET
 		   frontier=excluded.frontier, state=excluded.state,
-		   status=excluded.status, created_at=excluded.created_at`,
-		r.RunID, r.Step, string(frontier), string(state), r.Status, created.Format(time.RFC3339Nano))
+		   status=excluded.status, created_at=excluded.created_at, graph_path=excluded.graph_path`,
+		r.RunID, r.Step, string(frontier), string(state), r.Status, created.Format(time.RFC3339Nano), r.GraphPath)
 	if err != nil {
 		return fmt.Errorf("checkpoint: save: %w", err)
 	}
@@ -74,14 +75,14 @@ func (s *SQLiteStore) Save(ctx context.Context, r Record) error {
 // Latest returns the highest-step checkpoint for runID; ok is false if none exists.
 func (s *SQLiteStore) Latest(ctx context.Context, runID string) (Record, bool, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT step, frontier, state, status, created_at
+		`SELECT step, frontier, state, status, created_at, graph_path
 		 FROM checkpoints WHERE run_id = ? ORDER BY step DESC LIMIT 1`, runID)
 	var (
-		step               int
-		frontier, state    string
-		status, createdStr string
+		step                      int
+		frontier, state           string
+		status, createdStr, gpath string
 	)
-	switch err := row.Scan(&step, &frontier, &state, &status, &createdStr); err {
+	switch err := row.Scan(&step, &frontier, &state, &status, &createdStr, &gpath); err {
 	case sql.ErrNoRows:
 		return Record{}, false, nil
 	case nil:
@@ -90,7 +91,7 @@ func (s *SQLiteStore) Latest(ctx context.Context, runID string) (Record, bool, e
 		return Record{}, false, fmt.Errorf("checkpoint: latest: %w", err)
 	}
 
-	rec := Record{RunID: runID, Step: step, Status: status, State: graph.NewState()}
+	rec := Record{RunID: runID, Step: step, Status: status, State: graph.NewState(), GraphPath: gpath}
 	if err := json.Unmarshal([]byte(frontier), &rec.Frontier); err != nil {
 		return Record{}, false, fmt.Errorf("checkpoint: decode frontier: %w", err)
 	}

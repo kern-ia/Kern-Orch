@@ -166,14 +166,22 @@ func (e *Engine) runLevel(ctx context.Context, s *State, frontier []string) ([]s
 	}
 	wg.Wait()
 
-	// Merge deterministically (frontier order) and collect the next frontier deduped.
+	// Combine branches deterministically (frontier order) and collect the next frontier.
+	// A single-node frontier REPLACES the state with its branch, so context-replacing
+	// operations (Freeze / key deletion) and the Frozen counter propagate. A fan-out
+	// (>1 node) uses additive Merge, since each branch only contributes its own keys.
+	single := len(results) == 1
 	seen := make(map[string]bool)
 	var next []string
 	for _, o := range results {
 		if o.err != nil {
 			return nil, o.err
 		}
-		s.Merge(o.branch)
+		if single {
+			s.replaceWith(o.branch)
+		} else {
+			s.Merge(o.branch)
+		}
 		s.Step++
 		for _, to := range o.route {
 			if !seen[to] {
