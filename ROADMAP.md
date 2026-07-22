@@ -52,7 +52,7 @@ flowchart TB
   subgraph CORE["CORE — briques kern-* indépendantes"]
     direction TB
     PILOT["kern-pilot<br/>canal de pilotage<br/>steer · queue · replan · nudge<br/>⬜ à faire"]:::todo
-    ORCH["kern-orch (ce repo)<br/>orchestration · tâches courtes · zones de contexte<br/>gel = respawn contexte frais<br/>✅ moteur · 🟡 zones/gel"]:::done
+    ORCH["kern-orch (ce repo)<br/>orchestration · tâches courtes · zones de contexte<br/>gel = respawn contexte frais<br/>✅ EPIC-01 complet"]:::done
     SKILLS["kern-skills<br/>registre des skills<br/>✅ fait"]:::done
     TOOLS["kern-tools<br/>bibliothèque de tools<br/>🟡 partiel"]:::partial
     MEM["kern-memory<br/>mémoire agnostique · 100 % Go<br/>.okf + chromem-go + graphe léger<br/>⬜ cadrée · à implémenter"]:::todo
@@ -102,16 +102,16 @@ flowchart TB
 Chaque module = un épic. Taille indicative : **S** (~jours), **M** (~1–2 semaines),
 **L** (~3 semaines +). Les dépendances pointent vers ce qui doit exister avant.
 
-### ✅ EPIC-01 · kern-orch — Orchestration (moteur) — *ce repo, fait à 90 %*
+### ✅ EPIC-01 · kern-orch — Orchestration (moteur) — *ce repo, COMPLET*
 Rôle : possède le graphe, le state, le routage, les checkpoints. Cœur agnostique métier.
 - [x] State partagé sérialisable, Node (tool/agent/subgraph), edges Go-purs, fan-out
 - [x] Checkpoints SQLite + reprise (`resume`)
 - [x] Sous-graphes / sous-agents
-- [ ] 🟡 **Zones de contexte & « gel = respawn contexte frais »** — aujourd'hui on a un state
-  générique + state enfant frais par sous-graphe, mais pas de notion explicite de *zone de
-  contexte* ni de *gel → respawn d'un contexte neuf* pour un agent long. **Taille : M**
-- [ ] Persistance du chemin YAML dans le checkpoint (pour un `resume <run-id>` sans re-fournir le graphe). **S**
-- Dépendances : aucune.
+- [x] **Zones de contexte & « gel = respawn contexte frais »** — zones sur le State
+  (persistant/éphémère) + `Freeze` (carry-over pluggable) exposé en tool `freeze` (okf-0009)
+- [x] **Persistance du chemin YAML dans le checkpoint** → `resume <run-id>` sans re-fournir le
+  graphe (okf-0008)
+- Dépendances : aucune. **EPIC-01 clôturé (2026-07-22).**
 
 ### ✅ EPIC-02 · kern-skills — registre des skills — *fait (sous-package de kern-orch)*
 Rôle : catalogue des capacités (SKILL.md, `type: tool|agent`).
