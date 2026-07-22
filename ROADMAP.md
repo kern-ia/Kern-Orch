@@ -21,7 +21,7 @@ La famille (noms) :
 | **kern-obs** | observabilité agnostique | ⬜ module à part · en cours |
 | **kern-skills** | registre des skills (SKILL.md) | ✅ *(sous-package de kern-orch, extractible)* |
 | **kern-tools** | bibliothèque de tools | 🟡 *(sous-package de kern-orch, extractible)* |
-| **kern-memory** | gestion mémoire agnostique (`.okf` · RAG · DAG) | ⬜ **brique à cadrer (brainstorm)** |
+| **kern-memory** | gestion mémoire agnostique (`.okf` · RAG · DAG) | ⬜ **cadrée · 100 % Go · à implémenter** |
 | **kern-pilot** | canal de pilotage (steer · queue · replan · nudge) | ⬜ |
 | **kern-policy** | policies & permissions (règles · budgets · escalade) | ⬜ |
 | **kern-guard** | garde-fou structurel (inline · bloquant) | ⬜ |
@@ -55,7 +55,7 @@ flowchart TB
     ORCH["kern-orch (ce repo)<br/>orchestration · tâches courtes · zones de contexte<br/>gel = respawn contexte frais<br/>✅ moteur · 🟡 zones/gel"]:::done
     SKILLS["kern-skills<br/>registre des skills<br/>✅ fait"]:::done
     TOOLS["kern-tools<br/>bibliothèque de tools<br/>🟡 partiel"]:::partial
-    MEM["kern-memory<br/>mémoire agnostique · .okf · RAG · DAG<br/>⬜ à cadrer (brainstorm)"]:::brainstorm
+    MEM["kern-memory<br/>mémoire agnostique · 100 % Go<br/>.okf + chromem-go + graphe léger<br/>⬜ cadrée · à implémenter"]:::todo
     EXEC["kern-exec<br/>exécution terminal / sandbox<br/>⬜ à faire"]:::todo
     POL["kern-policy<br/>règles · budgets · escalade<br/>⬜ à faire"]:::todo
     GUARD["kern-guard<br/>garde-fou structurel · inline · bloquant<br/>⬜ à faire"]:::todo
@@ -200,23 +200,39 @@ Agnostique : ingère l'OTLP/GenAI de **n'importe quelle** brique `kern-*`, pas s
 - Frontière : **OTLP uniquement**. kern-obs ne connaît jamais le code de kern-orch.
   Alimente le futur kern-scorer (mêmes spans). *(roadmap propre au repo kern-obs)*
 
-### 🧠 EPIC-13 · kern-memory — mémoire agnostique — *brique à CADRER (brainstorm avant épic)*
+### 🧠 EPIC-13 · kern-memory — mémoire agnostique — *cadrée (brainstorm 2026-07-22), à implémenter*
 Brique `kern-*` autonome et agnostique : fournit contexte et rappel à **n'importe quelle** brique
-(pas seulement kern-orch), via un contrat neutre. **Pas encore un épic** — à brainstormer avant de
-figer le périmètre et les tâches. **État de l'art techno : `kern-memory-etat-de-lart.md`.** Axes à
-explorer :
-- **`.okf`** — index/fiches structurés (cf. les fiches OKF du repo) : mémoire « déclarative »,
-  relisible, versionnable ; quel format, quelle granularité, quelle indexation ?
-- **RAG** — récupération sémantique (embeddings + vector store) : quel store (souverain,
-  self-host), quel modèle d'embedding, réintégration dans le state / le prompt ?
-- **DAG** — mémoire structurée en graphe (entités/relations, graph-aware) : distinct ou couplé
-  au graphe d'exécution de kern-orch ? Lien avec les sous-graphes ?
-- **Agnosticité & frontière** — contrat d'accès (query/write) neutre, indépendant de kern-orch ;
-  articulation avec `kern-anon` (mémoriser du pseudonymisé) et `kern-obs` (traçabilité des rappels).
-- **Portée mémoire** — court terme (run/state, déjà via checkpoints) vs long terme (cross-run,
-  cross-agent) : qu'est-ce qui va dans kern-memory vs reste dans le state/checkpoints ?
-- Décisions à prendre au brainstorm : périmètre exact, format `.okf`, choix store RAG souverain,
-  modèle de graphe, contrat d'API. → **ouvrir l'épic une fois ces points tranchés.**
+via un contrat neutre. État de l'art : `kern-memory-etat-de-lart.md`.
+
+**Décisions du brainstorm (2026-07-22)** — cf. make-vs-adopt :
+- **100 % Go natif** (cohérent single-binary/souverain ; on n'adopte ni Cognee ni Graphiti).
+- Store vecteur par défaut **chromem-go** (embarqué, zéro service) ; **pgvector / Qdrant** en
+  option scale via le même contrat.
+- **Graphe / DAG léger en Go dès la phase 1** (sur SQLite/Postgres) — pas différé.
+- **Embeddings pluggables via env**, défaut modèle **local self-host** (option API externe).
+
+**Phase 1 — S1 (fondations) — M**
+- [ ] Contrat neutre `Memory` : `Write(mémoire)` / `Query(contexte)` — agnostique, backends
+  pluggables via env (comme kern-link/kern-obs) ; défaut off = no-op **S**
+- [ ] Couche **`.okf`** : mémoire déclarative versionnée/auditable (format + indexation ;
+  s'appuyer sur les fiches OKF existantes) **M**
+- [ ] Couche **vecteur** : adapter **chromem-go** (embarqué) derrière le contrat ; interface
+  **embeddings pluggable** (défaut local) **M**
+
+**Phase 1 — S2 (graphe + routage) — M–L**
+- [ ] Couche **graphe/DAG léger en Go** (entités/relations sur SQLite/Postgres ; multi-hop,
+  provenance ; temporel = étude) **L**
+- [ ] **Routage** de requête → couche adaptée (factoïde→vecteur, multi-hop→graphe,
+  déclaratif→.okf) **M**
+- [ ] Adapters **scale** optionnels : pgvector / Qdrant derrière le contrat vecteur **M**
+
+**Transverses (dès phase 1)**
+- [ ] Intégration **kern-anon** : mémoriser du **pseudonymisé** **S**
+- [ ] Intégration **kern-obs** : **tracer les rappels** (spans) **S**
+
+**Reste à préciser** (détails, non bloquants) : format exact `.okf`, seuil de bascule
+chromem-go → pgvector/Qdrant, couplage éventuel du graphe mémoire avec les sous-graphes
+kern-orch, frontière court terme (state/checkpoints) vs long terme (cross-run/cross-agent).
 - Dépendances : contrat avec kern-orch (contexte/rappel), kern-anon, kern-obs.
 
 ### 🔌 EPIC-12 · Briques externes
