@@ -7,8 +7,9 @@
 
 Kern-Orch est la boîte **Orchestration** du CORE, plus les modules qui l'entourent
 directement (Skills, Tools, et le *client* de kern-link). Les couches de contrôle
-(pilotage, policies, garde-fou, PII, observation) et les briques externes (kern-link, vault,
-providers) restent à faire ou vivent hors de ce repo.
+(pilotage, policies, garde-fou, observation) restent à faire ; certaines briques sont
+externes et déjà faites (kern-link, PII/Presidio) — il reste à les câbler. Le vault, l'UI et
+les providers vivent hors de ce repo.
 
 **Légende de statut**
 - ✅ **fait** — présent et testé dans ce repo
@@ -31,7 +32,7 @@ flowchart TB
     EXEC["exécution terminal / sandbox<br/>⬜ à faire"]:::todo
     POL["Policies &amp; permissions<br/>règles · budgets · escalade<br/>⬜ à faire"]:::todo
     GUARD["Garde-fou structurel<br/>inline · bloquant<br/>⬜ à faire"]:::todo
-    PII["Données / PII<br/>pseudonymisation par ID (Presidio)<br/>⬜ à faire"]:::todo
+    PII["Données / PII<br/>pseudonymisation par ID (Presidio)<br/>🔌 externe · ✅ fait · ⬜ intégration"]:::extdone
     LINK["kern-link<br/>stream &amp; multi-provider · point unique<br/>🔌 externe · client agentrunner ✅"]:::link
     SCORER["Scorer sémantique<br/>async · score / alerte<br/>⬜ à faire"]:::todo
 
@@ -61,6 +62,7 @@ flowchart TB
   classDef partial fill:#fef9c3,stroke:#ca8a04,color:#3f2d02;
   classDef todo fill:#f1f5f9,stroke:#94a3b8,color:#334155,stroke-dasharray:4 3;
   classDef link fill:#bfdbfe,stroke:#2563eb,color:#0f2a52,stroke-width:2px;
+  classDef extdone fill:#bbf7d0,stroke:#15803d,color:#052e16,stroke-width:2px,stroke-dasharray:5 4;
   classDef ext fill:#e5e7eb,stroke:#9ca3af,color:#374151,stroke-dasharray:5 4;
 ```
 
@@ -123,11 +125,13 @@ Rôle : validation **bloquante** en ligne entre Orchestration et données (sché
 - [ ] Garde-fous runtime sur le state/sorties (schémas, contraintes métier), bloquants **M**
 - Dépendances : EPIC-01.
 
-### ⬜ EPIC-08 · Données / PII (Presidio)
+### 🔌 EPIC-08 · Données / PII (Presidio) — *brique externe faite, intégration à faire*
 Rôle : pseudonymisation par ID avant l'appel LLM ; ré-hydratation au retour.
-- [ ] Détection PII + mapping pseudonyme↔réel par ID (Presidio) **L**
-- [ ] Passe avant kern-link, inverse après **M**
-- Dépendances : EPIC-01, positionné juste avant kern-link.
+- [x] 🔌 Brique de pseudonymisation (Presidio) — **externe, fonctionnelle**
+- [ ] Définir le contrat d'intégration (I/O de la brique) **S**
+- [ ] Câblage côté Kern-Orch : pseudonymiser à l'aller / ré-hydrater au retour, autour de
+  kern-link (juste avant/après l'`agentrunner`) **M**
+- Dépendances : EPIC-01 ; positionné juste avant kern-link ; accès à la brique PII.
 
 ### 🔌 EPIC-09 · kern-link (client) — *externe, client fait*
 Rôle : point de passage unique vers les providers (stream & multi-provider). La brique
@@ -159,11 +163,12 @@ Rôle : signaux temps réel + comparaison *ce qui était déclaré* vs *ce qui e
 ## Ordre suggéré (jalons)
 
 1. **Consolider le CORE** (déjà là) : finir EPIC-01 (zones/gel, resume+YAML) et EPIC-03 (tools).
-2. **Sécuriser le flux** : EPIC-06 (policies) → EPIC-07 (garde-fou) → EPIC-08 (PII) — c'est
-   la colonne verticale Orchestration → … → kern-link de la carte.
+2. **Sécuriser le flux** : EPIC-06 (policies) → EPIC-07 (garde-fou) → EPIC-08 (câbler la PII
+   externe) — c'est la colonne verticale Orchestration → … → kern-link de la carte.
 3. **Boucler kern-link** : EPIC-09 dès l'accès à la brique du collègue.
 4. **Contrôle & feedback** : EPIC-11 (observation) puis EPIC-05 (pilotage) et EPIC-10 (scorer).
 5. **Isolation d'exécution** : EPIC-04 (sandbox) quand les policies existent.
 
-> Estimation grossière du reste (hors externes) : ~**8–11 semaines** de travail à un dev,
-> dominées par pilotage (L), observation/analyseur (L), PII (L) et l'exposition tools (L).
+> Estimation grossière du reste (hors externes) : ~**7–9 semaines** de travail à un dev,
+> dominées par pilotage (L), observation/analyseur (L) et l'exposition tools (L). La PII est
+> désormais externe (reste l'intégration, M) et non plus un développement complet.
