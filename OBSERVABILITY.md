@@ -1,9 +1,22 @@
-# Observabilité — état de l'art & décision (EPIC-11)
+# Observabilité — état de l'art & décision (kern-obs)
 
 > Question de départ : *LangSmith est-il une piste pour l'observabilité ? On gère ça en Go ?*
 > Réponse courte : **non à LangSmith comme socle** (propriétaire, non souverain, Python/JS-first) ;
-> **oui on gère en Go**, mais via **OpenTelemetry (conventions GenAI)** + un **backend open source
-> pluggable**, pas en réécrivant une plateforme. État de l'art ci-dessous. — 2026-07-22.
+> **oui on gère en interne**, sous forme d'une **brique autonome `kern-obs`, agnostique**, séparée
+> de kern-orch. La frontière entre les deux = **OpenTelemetry (conventions GenAI) sur OTLP**.
+> État de l'art ci-dessous. — 2026-07-22.
+
+## Principe : kern-obs est une brique à part entière
+
+Comme kern-orch, kern-anon et kern-link, **kern-obs est un module `kern-*` autonome**. Il est
+**agnostique de qui l'émet** : il observe **n'importe quelle** brique qui émet des spans OTel/GenAI,
+pas seulement kern-orch.
+
+- **kern-orch** ne fait qu'**émettre** de la télémétrie OTLP → **zéro dépendance vers kern-obs**.
+- **kern-obs** **ingère** l'OTLP, stocke, surveille (Watcher) et analyse (« déclaré vs observé »).
+  Il peut **embarquer en interne** un backend OSS (Langfuse/Phoenix) — c'est un détail
+  d'implémentation de kern-obs, invisible des autres briques.
+- La seule chose partagée entre briques : le **contrat OTLP + conventions `gen_ai.*`**.
 
 ## Le constat structurant
 
@@ -29,50 +42,62 @@ d'attributs peuvent changer sans bump majeur. → **épingler une version**, iso
 | **SigNoz / OpenObserve** | Apache-2.0 / AGPL-ish | ✅ | ✅ via OTLP | moyenne/légère | non | backends OTel généralistes (traces/logs/métriques) |
 | **LangSmith** | **propriétaire** (closed) | ❌ Enterprise only | SDK Py/JS | SaaS | ✅ | ~2 514 $/mo à 1M events vs ~101 $ Langfuse ; **écarté** |
 
-## Recommandation pour Kern-Orch
+## Recommandation : deux moitiés, une frontière OTLP
 
-**Ne pas réécrire de plateforme d'observabilité, ne pas se lier à un vendeur.**
+**Ne pas réécrire de plateforme, ne pas se lier à un vendeur — et surtout ne pas mettre
+l'observabilité *dans* kern-orch.** On sépare nettement l'**émission** (kern-orch) de la
+**brique d'observabilité** (kern-obs).
 
-1. **Instrumenter le harnais en Go avec OpenTelemetry** (SDK OTel Go), en conventions GenAI.
-   Les points d'émission existent déjà :
-   - le hook **`Engine.StepFunc`** → un span par niveau/nœud (déjà la couture de persistance) ;
+### Côté kern-orch — juste émettre (fin, dans ce repo)
+1. **Instrumenter en Go avec OpenTelemetry** (SDK OTel Go), conventions GenAI. Points d'émission
+   déjà présents :
+   - hook **`Engine.StepFunc`** → un span par niveau/nœud (déjà la couture de persistance) ;
    - **`agentrunner`** → un span `gen_ai` par appel LLM (prompt, tokens, latence, provider) ;
-   - un span racine par run (le `runID` des checkpoints devient le `trace_id`).
-2. **Exporter en OTLP**, backend **pluggable via env** (comme `KERN_AGENT_CLI` / `KERN_CHECKPOINT_DB`) :
-   - **défaut souverain : Langfuse self-host** (MIT, OTLP natif) ;
-   - **alternative légère : Arize Phoenix** (1 process, evals agent) ;
-   - **ou rien** : pas d'endpoint configuré → no-op (l'app tourne, comme le Stub LLM).
-3. **Ne dépendre d'aucun de ces backends dans le code** : on ne connaît qu'OTLP + `gen_ai.*`.
+   - span racine par run (le `runID` des checkpoints devient le `trace_id`) ;
+   - **plan déclaré** émis comme attributs (nœuds/edges attendus).
+2. **Exporter en OTLP**, endpoint **pluggable via env** (comme `KERN_AGENT_CLI` / `KERN_CHECKPOINT_DB`) ;
+   pas d'endpoint → **no-op** (l'app tourne, comme le Stub LLM).
+3. **Aucune dépendance** vers kern-obs ni vers un backend : on ne connaît qu'OTLP + `gen_ai.*`.
+
+### Brique kern-obs — ingérer, surveiller, analyser (module à part)
+Agnostique : consomme l'OTLP de **toute** brique `kern-*`. Peut **embarquer** Langfuse (MIT,
+souverain, défaut) ou Phoenix (léger, evals) **en interne** — invisible du reste.
 
 ```mermaid
 flowchart LR
-  subgraph KO["Kern-Orch (Go)"]
-    ENG["Engine · StepFunc"]:::us
-    AR["agentrunner"]:::us
-    OTEL["OTel SDK Go<br/>spans gen_ai.*"]:::otel
+  subgraph EMIT["Briques émettrices (kern-*)"]
+    KO["kern-orch<br/>Engine · agentrunner<br/>OTel SDK Go"]:::us
+    KL["kern-link"]:::us2
+    KA["kern-anon"]:::us2
   end
-  ENG --> OTEL
-  AR --> OTEL
-  OTEL == OTLP ==> BK
-  subgraph BK["Backend pluggable (OSS)"]
-    LF["Langfuse<br/>MIT · défaut"]:::bk
-    PX["Phoenix<br/>léger · evals"]:::bk
+  subgraph OBS["kern-obs — brique autonome agnostique"]
+    ING["Ingestion OTLP"]:::otel
+    WATCH["Watcher temps réel"]:::otel
+    ANA["Analyseur déclaré vs observé"]:::otel
+    BK["backend interne<br/>Langfuse / Phoenix"]:::bk
+    ING --> BK
+    ING --> WATCH
+    ING --> ANA
   end
+  KO == "OTLP · gen_ai.*" ==> ING
+  KL -. OTLP .-> ING
+  KA -. OTLP .-> ING
   classDef us fill:#bbf7d0,stroke:#15803d,color:#052e16;
+  classDef us2 fill:#dcfce7,stroke:#15803d,color:#052e16,stroke-dasharray:4 3;
   classDef otel fill:#bfdbfe,stroke:#2563eb,color:#0f2a52;
   classDef bk fill:#fef9c3,stroke:#ca8a04,color:#3f2d02;
 ```
 
-### Où ça branche l'EPIC-11 « déclaré vs observé »
+### « Déclaré vs observé » sans casser l'agnosticité
 - **observé** = la trace OTel réelle du run (spans nœuds + appels LLM).
-- **déclaré** = la topologie du graphe (le plan attendu, déjà en mémoire).
-- **Analyseur** = comparer les deux → c'est **notre valeur ajoutée** ; OTel/Langfuse ne fait
-  que fournir le substrat (collecte, stockage, UI, evals). Le **Watcher temps réel** = un
-  exporter/reader sur le flux de spans.
+- **déclaré** = le plan **émis en télémétrie** par kern-orch (attributs nœuds/edges attendus) —
+  donc kern-obs le lit **dans les spans**, sans jamais toucher au code de kern-orch.
+- **Analyseur** = comparer les deux → **valeur ajoutée de kern-obs**. Un backend OSS ne fournit
+  que le substrat (collecte, stockage, UI, evals).
 
-**Bilan** : OTel + Langfuse (ou Phoenix) remplacent le gros du travail « plomberie » d'EPIC-11
-(collecte, stockage, UI, métriques, evals). Reste à écrire : l'instrumentation Go (S–M) et
-l'analyseur déclaré-vs-observé (M–L), pas une plateforme.
+**Bilan** : OTel + un backend embarqué remplacent la plomberie (collecte, stockage, UI, evals).
+Reste à écrire — répartis sur **deux repos** : l'émission Go côté kern-orch (S–M), et la brique
+kern-obs (ingestion + watcher + analyseur, M–L). Pas une plateforme from scratch.
 
 ## Sources
 - [Best AI Agent Observability Tools 2026 — Latitude](https://latitude.so/blog/best-ai-agent-observability-tools-2026-comparison)

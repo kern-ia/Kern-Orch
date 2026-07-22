@@ -3,19 +3,36 @@
 > Situe **Kern-Orch** (ce repo) dans l'écosystème cible « Kern » et détaille le travail
 > restant, module par module, pour s'organiser. Dernière mise à jour : 2026-07-22.
 
+## Principe : des briques autonomes et agnostiques
+
+Chaque boîte de la carte est une **brique `kern-*` autonome et agnostique** — un module à part
+entière (repo/déployable propre), composable via des **contrats standards**, jamais du code
+enfoui dans une autre brique. Une brique ne dépend pas des internes d'une autre : elles se
+parlent par des frontières neutres (subprocess/JSON-lines pour kern-link, OTLP/GenAI pour
+kern-obs, etc.).
+
+La famille (noms) :
+
+| Brique | Rôle | Statut |
+|---|---|---|
+| **kern-orch** | orchestration (ce repo) | ✅ moteur |
+| **kern-anon** | anonymisation / PII (Presidio) | 🔌 externe · faite |
+| **kern-link** | passage LLM multi-provider (point unique) | 🔌 externe · client fait |
+| **kern-obs** | observabilité agnostique | ⬜ module à part · en cours |
+| *(à venir)* | pilotage · policies · garde-fou · sandbox · scorer | ⬜ |
+
 ## Où se situe ce repo
 
-Kern-Orch est la boîte **Orchestration** du CORE, plus les modules qui l'entourent
-directement (Skills, Tools, et le *client* de kern-link). Les couches de contrôle
-(pilotage, policies, garde-fou, observation) restent à faire ; certaines briques sont
-externes et déjà faites (kern-link, PII/Presidio) — il reste à les câbler. Le vault, l'UI et
-les providers vivent hors de ce repo.
+Kern-Orch est la brique **Orchestration** du CORE, plus ce qu'elle porte directement (Skills,
+Tools, et le *client* de kern-link). Les autres briques de contrôle sont des modules `kern-*`
+séparés : certaines déjà faites (kern-anon, kern-link) à **câbler** par contrat, les autres à
+créer. **kern-orch ne dépend d'aucune** ; il expose/consomme des contrats.
 
 **Légende de statut**
 - ✅ **fait** — présent et testé dans ce repo
 - 🟡 **partiel** — amorcé, incomplet
 - ⬜ **à faire** — pas commencé
-- 🔌 **externe** — hors de ce repo (brique séparée / dépendance)
+- 🔌 **externe** — brique `kern-*` séparée / dépendance (hors de ce repo)
 
 ## Cartographie (mermaid)
 
@@ -32,11 +49,11 @@ flowchart TB
     EXEC["exécution terminal / sandbox<br/>⬜ à faire"]:::todo
     POL["Policies &amp; permissions<br/>règles · budgets · escalade<br/>⬜ à faire"]:::todo
     GUARD["Garde-fou structurel<br/>inline · bloquant<br/>⬜ à faire"]:::todo
-    PII["Données / PII<br/>pseudonymisation par ID (Presidio)<br/>🔌 externe · ✅ fait · ⬜ intégration"]:::extdone
+    PII["kern-anon<br/>anonymisation / PII (Presidio)<br/>🔌 externe · ✅ fait · ⬜ intégration"]:::extdone
     LINK["kern-link<br/>stream &amp; multi-provider · point unique<br/>🔌 externe · client agentrunner ✅"]:::link
     SCORER["Scorer sémantique<br/>async · score / alerte<br/>⬜ à faire"]:::todo
 
-    subgraph OBS["observation"]
+    subgraph OBS["kern-obs — observabilité (brique agnostique · en cours)"]
       direction TB
       WATCH["Watcher<br/>signaux temps réel<br/>⬜ à faire"]:::todo
       ANA["Analyseur de process<br/>déclaré vs observé<br/>⬜ à faire"]:::todo
@@ -125,13 +142,14 @@ Rôle : validation **bloquante** en ligne entre Orchestration et données (sché
 - [ ] Garde-fous runtime sur le state/sorties (schémas, contraintes métier), bloquants **M**
 - Dépendances : EPIC-01.
 
-### 🔌 EPIC-08 · Données / PII (Presidio) — *brique externe faite, intégration à faire*
-Rôle : pseudonymisation par ID avant l'appel LLM ; ré-hydratation au retour.
+### 🔌 EPIC-08 · kern-anon (PII/Presidio) — *brique externe faite, intégration à faire*
+Rôle : pseudonymisation par ID avant l'appel LLM ; ré-hydratation au retour. Brique `kern-*`
+autonome et agnostique — kern-orch ne fait que la câbler par contrat.
 - [x] 🔌 Brique de pseudonymisation (Presidio) — **externe, fonctionnelle**
 - [ ] Définir le contrat d'intégration (I/O de la brique) **S**
-- [ ] Câblage côté Kern-Orch : pseudonymiser à l'aller / ré-hydrater au retour, autour de
+- [ ] Câblage côté kern-orch : pseudonymiser à l'aller / ré-hydrater au retour, autour de
   kern-link (juste avant/après l'`agentrunner`) **M**
-- Dépendances : EPIC-01 ; positionné juste avant kern-link ; accès à la brique PII.
+- Dépendances : EPIC-01 ; positionné juste avant kern-link ; accès à la brique kern-anon.
 
 ### 🔌 EPIC-09 · kern-link (client) — *externe, client fait*
 Rôle : point de passage unique vers les providers (stream & multi-provider). La brique
@@ -146,21 +164,29 @@ Rôle : scorer les échanges (qualité/dérive) en asynchrone, émettre des aler
 - [ ] Seuils & alertes **S**
 - Dépendances : EPIC-09, EPIC-11.
 
-### ⬜ EPIC-11 · Observation (Watcher + Analyseur déclaré vs observé)
-Rôle : signaux temps réel + comparaison *ce qui était déclaré* vs *ce qui est réellement fait*.
-**Décision** : **OpenTelemetry (conventions GenAI)** émis en Go + backend OSS pluggable via OTLP
-(défaut **Langfuse** self-host MIT, ou **Phoenix**). **LangSmith écarté** (propriétaire, non
-souverain, Python/JS-first, cher). On n'écrit pas de plateforme. → voir `OBSERVABILITY.md`.
+### EPIC-11 · Observabilité — deux moitiés distinctes
+**Décision** : **OpenTelemetry (conventions GenAI)** comme frontière neutre ; **LangSmith écarté**
+(propriétaire, non souverain, Python/JS-first, cher). → voir `OBSERVABILITY.md`. À séparer
+strictement en deux :
+
+**11a — côté kern-orch (émission, DANS ce repo) — S–M**
+Fine couche : émettre, sans aucune dépendance vers kern-obs.
 - [x] Embryon : checkpoints + `status`
-- [ ] Instrumentation OTel Go : span racine par run (trace = runID), span par nœud (hook
-  `StepFunc`), span `gen_ai.*` par appel LLM (`agentrunner`) **S–M**
+- [ ] Span racine par run (trace = runID), span par nœud (hook `StepFunc`), span `gen_ai.*`
+  par appel LLM (`agentrunner`) **S–M**
+- [ ] Émettre le **plan déclaré** comme attributs de télémétrie (nœuds/edges attendus), pour
+  que le « déclaré vs observé » reste faisable **sans** lire l'intérieur de kern-orch **S**
 - [ ] Exporter OTLP pluggable via env (défaut off = no-op, comme le Stub) **S**
-- [ ] Analyseur « déclaré vs observé » : topologie du graphe (déclaré) vs trace OTel (observé) —
-  **notre valeur ajoutée**, pas fourni par les backends **M–L**
-- [ ] Watcher temps réel = reader/exporter sur le flux de spans **M**
-- [ ] Boucle de feedback vers le Canal de pilotage **M**
 - Dépendances : EPIC-01 ; épingler une version des semconv GenAI (statut « Development »).
-  Alimente EPIC-05, EPIC-10 (le Scorer sémantique consomme les mêmes spans).
+
+**11b — 🧱 kern-obs (brique autonome, HORS de ce repo) — module à part**
+Agnostique : ingère l'OTLP/GenAI de **n'importe quelle** brique `kern-*`, pas seulement kern-orch.
+- [ ] Ingestion OTLP + stockage (peut s'appuyer en interne sur Langfuse/Phoenix) **M**
+- [ ] Watcher temps réel (flux de spans) **M**
+- [ ] Analyseur « déclaré vs observé » (plan émis vs trace réelle) — **valeur ajoutée** **M–L**
+- [ ] Boucle de feedback vers kern-pilot (le Canal de pilotage) **M**
+- Frontière : **OTLP uniquement**. kern-obs ne connaît jamais le code de kern-orch.
+  Alimente le futur kern-scorer (mêmes spans). *(roadmap propre au repo kern-obs)*
 
 ### 🔌 EPIC-12 · Briques externes
 - UI, Credentials vault (hors corps), Providers LLM — hors de ce repo. Contrats
