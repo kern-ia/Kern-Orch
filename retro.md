@@ -36,3 +36,13 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
 - Garde récursion : set "in-progress" par chemin absolu, supprimé au retour → cycle a→b→a détecté,
   réutilisation DAG d'un même fichier autorisée.
 - Reste ouvert et inchangé : contrat §6.4 (CLI collègue), resume redemande le YAML.
+
+## 2026-07-22 — Clôture EPIC-01 (resume+graphpath, zones/gel)
+- Checkpoint : chemin du graphe persisté (colonne `graph_path DEFAULT ''`) → `resume <run-id>`
+  sans re-fournir le YAML. Toujours stocker le chemin ABSOLU (résolu au run) sinon resume
+  depuis un autre cwd casse.
+- Zones de contexte + gel : le `Merge` du moteur est **additif** (n'exprime pas la suppression).
+  Un `Freeze` (respawn contexte frais) sur un clone puis merge ne propageait pas les
+  suppressions ni le compteur `Frozen`. Fix : frontière **mono-nœud → remplacement** par la
+  branche (elle contient déjà tout le state) ; **fan-out (>1) → merge additif**. Piège de
+  moteur graphe à retenir : un merge additif ne peut pas modéliser un « reset/gel » de contexte.

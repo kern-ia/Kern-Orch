@@ -44,6 +44,12 @@ func builtinRegistry(runner graph.AgentRunner) *topology.Registry {
 		s.Set("n", 3)
 		return nil
 	})
+	// freeze: respawns a fresh context — drops ephemeral-zone keys, keeps persistent
+	// ones ("gel = respawn contexte frais"). Node type: tool, func: freeze.
+	reg.Tool("freeze", func(_ context.Context, s *graph.State) error {
+		s.Freeze(nil)
+		return nil
+	})
 	return reg
 }
 

@@ -1,0 +1,19 @@
+# Context-zone / freeze example. Run with: kern-orch run examples/freeze.yaml
+# The agent works, then a `freeze` node respawns a fresh context: ephemeral scratch is
+# dropped, persistent facts survive. Useful to keep a long agent's context small.
+entry: think
+nodes:
+  - id: think
+    type: agent
+    prompt: "Do some work"
+  - id: gel
+    type: tool
+    func: freeze
+  - id: done
+    type: tool
+    func: noop
+edges:
+  - from: think
+    to: [gel]
+  - from: gel
+    to: [done]
