@@ -203,7 +203,8 @@ Agnostique : ingère l'OTLP/GenAI de **n'importe quelle** brique `kern-*`, pas s
 ### 🧠 EPIC-13 · kern-memory — mémoire agnostique — *brique à CADRER (brainstorm avant épic)*
 Brique `kern-*` autonome et agnostique : fournit contexte et rappel à **n'importe quelle** brique
 (pas seulement kern-orch), via un contrat neutre. **Pas encore un épic** — à brainstormer avant de
-figer le périmètre et les tâches. Axes à explorer :
+figer le périmètre et les tâches. **État de l'art techno : `kern-memory-etat-de-lart.md`.** Axes à
+explorer :
 - **`.okf`** — index/fiches structurés (cf. les fiches OKF du repo) : mémoire « déclarative »,
   relisible, versionnable ; quel format, quelle granularité, quelle indexation ?
 - **RAG** — récupération sémantique (embeddings + vector store) : quel store (souverain,
