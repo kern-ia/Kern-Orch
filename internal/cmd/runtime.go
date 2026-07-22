@@ -57,15 +57,17 @@ func openStore(cfg config.Config) (*checkpoint.SQLiteStore, error) {
 	return checkpoint.OpenSQLite(cfg.CheckpointDB)
 }
 
-// checkpointHook persists the state after each level under runID.
-func checkpointHook(store *checkpoint.SQLiteStore, runID string) graph.StepFunc {
+// checkpointHook persists the state after each level under runID, recording graphPath
+// so `resume` can reload the graph without the caller re-supplying it.
+func checkpointHook(store *checkpoint.SQLiteStore, runID, graphPath string) graph.StepFunc {
 	return func(ctx context.Context, info graph.StepInfo, s *graph.State) error {
 		status := checkpoint.StatusRunning
 		if len(info.Frontier) == 0 {
 			status = checkpoint.StatusDone
 		}
 		return store.Save(ctx, checkpoint.Record{
-			RunID: runID, Step: info.Step, Frontier: info.Frontier, State: s, Status: status,
+			RunID: runID, Step: info.Step, Frontier: info.Frontier, State: s,
+			Status: status, GraphPath: graphPath,
 		})
 	}
 }

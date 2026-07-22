@@ -30,6 +30,9 @@ type Record struct {
 	State     *graph.State
 	Status    string
 	CreatedAt time.Time
+	// GraphPath is the source graph file the run was launched from, so `resume` can
+	// reload it without the caller re-supplying the path.
+	GraphPath string
 }
 
 // Summary is a per-run rollup for the `status` command.

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -20,7 +21,11 @@ func newRunCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := config.FromEnv()
 			runner := newRunner(cfg)
-			g, err := topology.LoadFile(args[0], builtinRegistry(runner))
+			graphPath, err := filepath.Abs(args[0])
+			if err != nil {
+				return err
+			}
+			g, err := topology.LoadFile(graphPath, builtinRegistry(runner))
 			if err != nil {
 				return err
 			}
@@ -32,11 +37,11 @@ func newRunCmd() *cobra.Command {
 
 			runID := newRunID()
 			err = graph.NewEngine(g).
-				OnStep(checkpointHook(store, runID)).
+				OnStep(checkpointHook(store, runID, graphPath)).
 				Run(cmd.Context(), graph.NewState())
 			if err != nil {
 				fmt.Fprintf(cmd.OutOrStdout(), "run %s failed at last checkpoint: %v\n", runID, err)
-				fmt.Fprintf(cmd.OutOrStdout(), "resume with: kern-orch resume %s %s\n", runID, args[0])
+				fmt.Fprintf(cmd.OutOrStdout(), "resume with: kern-orch resume %s\n", runID)
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "run %s completed\n", runID)
@@ -47,11 +52,11 @@ func newRunCmd() *cobra.Command {
 
 func newResumeCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "resume <run-id> <graph.yaml>",
-		Short: "Resume a run from its last checkpoint",
-		Args:  cobra.ExactArgs(2),
+		Use:   "resume <run-id> [graph.yaml]",
+		Short: "Resume a run from its last checkpoint (graph path is optional — it is read from the checkpoint)",
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runID, graphPath := args[0], args[1]
+			runID := args[0]
 			cfg := config.FromEnv()
 			store, err := openStore(cfg)
 			if err != nil {
@@ -70,12 +75,20 @@ func newResumeCmd() *cobra.Command {
 				fmt.Fprintf(cmd.OutOrStdout(), "run %s already complete\n", runID)
 				return nil
 			}
+			// Graph path: explicit arg overrides, else the one recorded at run time.
+			graphPath := rec.GraphPath
+			if len(args) == 2 {
+				graphPath = args[1]
+			}
+			if graphPath == "" {
+				return fmt.Errorf("run %q has no recorded graph path; pass it explicitly: resume %s <graph.yaml>", runID, runID)
+			}
 			g, err := topology.LoadFile(graphPath, builtinRegistry(newRunner(cfg)))
 			if err != nil {
 				return err
 			}
 			if err := graph.NewEngine(g).
-				OnStep(checkpointHook(store, runID)).
+				OnStep(checkpointHook(store, runID, graphPath)).
 				RunFrom(cmd.Context(), rec.State, rec.Frontier); err != nil {
 				return err
 			}
