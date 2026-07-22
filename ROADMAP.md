@@ -19,14 +19,22 @@ La famille (noms) :
 | **kern-anon** | anonymisation / PII (Presidio) | 🔌 externe · faite |
 | **kern-link** | passage LLM multi-provider (point unique) | 🔌 externe · client fait |
 | **kern-obs** | observabilité agnostique | ⬜ module à part · en cours |
-| *(à venir)* | pilotage · policies · garde-fou · sandbox · scorer | ⬜ |
+| **kern-skills** | registre des skills (SKILL.md) | ✅ *(sous-package de kern-orch, extractible)* |
+| **kern-tools** | bibliothèque de tools | 🟡 *(sous-package de kern-orch, extractible)* |
+| **kern-pilot** | canal de pilotage (steer · queue · replan · nudge) | ⬜ |
+| **kern-policy** | policies & permissions (règles · budgets · escalade) | ⬜ |
+| **kern-guard** | garde-fou structurel (inline · bloquant) | ⬜ |
+| **kern-exec** | exécution terminal / sandbox | ⬜ |
+| **kern-scorer** | scorer sémantique (async · score / alerte) | ⬜ |
+| **kern-vault** | credentials vault | 🔌 externe |
 
 ## Où se situe ce repo
 
-Kern-Orch est la brique **Orchestration** du CORE, plus ce qu'elle porte directement (Skills,
-Tools, et le *client* de kern-link). Les autres briques de contrôle sont des modules `kern-*`
-séparés : certaines déjà faites (kern-anon, kern-link) à **câbler** par contrat, les autres à
-créer. **kern-orch ne dépend d'aucune** ; il expose/consomme des contrats.
+**kern-orch** est la brique **Orchestration** du CORE, plus ce qu'elle porte directement
+(**kern-skills**, **kern-tools**, et le *client* de kern-link) — aujourd'hui sous-packages de
+ce repo, extractibles en briques propres plus tard. Les autres briques `kern-*` sont des
+modules séparés : certaines déjà faites (kern-anon, kern-link) à **câbler** par contrat, les
+autres à créer. **kern-orch ne dépend d'aucune** ; il expose/consomme des contrats.
 
 **Légende de statut**
 - ✅ **fait** — présent et testé dans ce repo
@@ -38,20 +46,20 @@ créer. **kern-orch ne dépend d'aucune** ; il expose/consomme des contrats.
 
 ```mermaid
 flowchart TB
-  UI["UI"]:::ext
+  UI["kern-ui<br/>🔌 externe"]:::ext
 
-  subgraph CORE["CORE — packages indépendants"]
+  subgraph CORE["CORE — briques kern-* indépendantes"]
     direction TB
-    PILOT["Canal de pilotage<br/>steer · queue · replan · nudge<br/>⬜ à faire"]:::todo
-    ORCH["Orchestration — Kern-Orch (ce repo)<br/>tâches courtes · zones de contexte<br/>gel = respawn contexte frais<br/>✅ moteur · 🟡 zones/gel"]:::done
-    SKILLS["Skills registre<br/>✅ fait"]:::done
-    TOOLS["Tools<br/>🟡 partiel"]:::partial
-    EXEC["exécution terminal / sandbox<br/>⬜ à faire"]:::todo
-    POL["Policies &amp; permissions<br/>règles · budgets · escalade<br/>⬜ à faire"]:::todo
-    GUARD["Garde-fou structurel<br/>inline · bloquant<br/>⬜ à faire"]:::todo
+    PILOT["kern-pilot<br/>canal de pilotage<br/>steer · queue · replan · nudge<br/>⬜ à faire"]:::todo
+    ORCH["kern-orch (ce repo)<br/>orchestration · tâches courtes · zones de contexte<br/>gel = respawn contexte frais<br/>✅ moteur · 🟡 zones/gel"]:::done
+    SKILLS["kern-skills<br/>registre des skills<br/>✅ fait"]:::done
+    TOOLS["kern-tools<br/>bibliothèque de tools<br/>🟡 partiel"]:::partial
+    EXEC["kern-exec<br/>exécution terminal / sandbox<br/>⬜ à faire"]:::todo
+    POL["kern-policy<br/>règles · budgets · escalade<br/>⬜ à faire"]:::todo
+    GUARD["kern-guard<br/>garde-fou structurel · inline · bloquant<br/>⬜ à faire"]:::todo
     PII["kern-anon<br/>anonymisation / PII (Presidio)<br/>🔌 externe · ✅ fait · ⬜ intégration"]:::extdone
     LINK["kern-link<br/>stream &amp; multi-provider · point unique<br/>🔌 externe · client agentrunner ✅"]:::link
-    SCORER["Scorer sémantique<br/>async · score / alerte<br/>⬜ à faire"]:::todo
+    SCORER["kern-scorer<br/>scorer sémantique · async · score / alerte<br/>⬜ à faire"]:::todo
 
     subgraph OBS["kern-obs — observabilité (brique agnostique · en cours)"]
       direction TB
@@ -60,8 +68,8 @@ flowchart TB
     end
   end
 
-  VAULT["Credentials vault<br/>externalisé — hors corps<br/>🔌 externe"]:::ext
-  PROV["Providers LLM<br/>🔌 externe"]:::ext
+  VAULT["kern-vault<br/>credentials · hors corps<br/>🔌 externe"]:::ext
+  PROV["Providers LLM<br/>🔌 tiers"]:::ext
 
   UI --> PILOT
   PILOT ==> ORCH
@@ -90,7 +98,7 @@ flowchart TB
 Chaque module = un épic. Taille indicative : **S** (~jours), **M** (~1–2 semaines),
 **L** (~3 semaines +). Les dépendances pointent vers ce qui doit exister avant.
 
-### ✅ EPIC-01 · Orchestration (moteur) — *ce repo, fait à 90 %*
+### ✅ EPIC-01 · kern-orch — Orchestration (moteur) — *ce repo, fait à 90 %*
 Rôle : possède le graphe, le state, le routage, les checkpoints. Cœur agnostique métier.
 - [x] State partagé sérialisable, Node (tool/agent/subgraph), edges Go-purs, fan-out
 - [x] Checkpoints SQLite + reprise (`resume`)
@@ -101,13 +109,13 @@ Rôle : possède le graphe, le state, le routage, les checkpoints. Cœur agnosti
 - [ ] Persistance du chemin YAML dans le checkpoint (pour un `resume <run-id>` sans re-fournir le graphe). **S**
 - Dépendances : aucune.
 
-### ✅ EPIC-02 · Skills registre — *fait*
+### ✅ EPIC-02 · kern-skills — registre des skills — *fait (sous-package de kern-orch)*
 Rôle : catalogue des capacités (SKILL.md, `type: tool|agent`).
 - [x] Load frontmatter, `list-skills`
 - [ ] Lien registre ↔ exécution : qu'un `type: tool` soit **exécutable** sans redéclarer une func Go par nom (fusionner catalogue et `topology.Registry`). **M** — *voir EPIC-03*
 - Dépendances : aucune.
 
-### 🟡 EPIC-03 · Tools — *partiel*
+### 🟡 EPIC-03 · kern-tools — bibliothèque de tools — *partiel (sous-package de kern-orch)*
 Rôle : bibliothèque de tools invoqués par un agent, consommés aussi par l'UI/MCP/API.
 - [x] `topology.Registry` (funcs tool/router par nom) + builtins de démo
 - [ ] Format de tool réutilisable (schéma d'entrée/sortie, validation) **M**
@@ -115,28 +123,28 @@ Rôle : bibliothèque de tools invoqués par un agent, consommés aussi par l'UI
 - [ ] Exposition MCP/API des tools (un service unique, zéro duplication) **L**
 - Dépendances : EPIC-02.
 
-### ⬜ EPIC-04 · exécution terminal / sandbox
+### ⬜ EPIC-04 · kern-exec — exécution terminal / sandbox
 Rôle : exécuter des tools/commandes dans un bac à sable (isolation, timeouts, quotas).
 - [ ] Runner sandboxé (process isolé, cwd/env contrôlés, timeout) **M**
 - [ ] Politique de ressources (CPU/mém/FS/réseau) **L**
 - [ ] Intégration comme type de nœud/tool **S**
 - Dépendances : EPIC-03, EPIC-06 (policies).
 
-### ⬜ EPIC-05 · Canal de pilotage (steering)
+### ⬜ EPIC-05 · kern-pilot — canal de pilotage (steering)
 Rôle : piloter un run en cours — `steer · queue · replan · nudge` (human/agent-in-the-loop).
 - [ ] Boucle de contrôle : file d'instructions injectables dans un run vivant **L**
 - [ ] `replan` (réécrire la frontière/graphe en cours) + `nudge` **L**
 - [ ] Reçoit le feedback de l'observation (flèche retour de la carte) **M**
 - Dépendances : EPIC-01, EPIC-11 (observation).
 
-### ⬜ EPIC-06 · Policies & permissions
+### ⬜ EPIC-06 · kern-policy — policies & permissions
 Rôle : règles, budgets, escalade — **sans secrets** (les secrets = vault externe).
 - [ ] Modèle de règles (qui peut quel tool/skill, budgets de tokens/temps) **M**
 - [ ] Point d'application avant orchestration (la flèche Policies → Orchestration) **M**
 - [ ] Escalade / approbations **M**
 - Dépendances : EPIC-01.
 
-### ⬜ EPIC-07 · Garde-fou structurel (inline, bloquant)
+### ⬜ EPIC-07 · kern-guard — garde-fou structurel (inline, bloquant)
 Rôle : validation **bloquante** en ligne entre Orchestration et données (schémas, invariants).
 - [x] Embryon : `Graph.Validate` (topologie)
 - [ ] Garde-fous runtime sur le state/sorties (schémas, contraintes métier), bloquants **M**
@@ -158,13 +166,13 @@ elle-même est **externe** (repo du collègue).
 - [ ] **Réconcilier le contrat §6.4** avec la vraie CLI dès accès **M** *(bloquant externe)*
 - Dépendances : accès au repo kern-link.
 
-### ⬜ EPIC-10 · Scorer sémantique (async)
+### ⬜ EPIC-10 · kern-scorer — scorer sémantique (async)
 Rôle : scorer les échanges (qualité/dérive) en asynchrone, émettre des alertes.
 - [ ] Hook async sur kern-link (télémétrie) → score **M**
 - [ ] Seuils & alertes **S**
 - Dépendances : EPIC-09, EPIC-11.
 
-### EPIC-11 · Observabilité — deux moitiés distinctes
+### EPIC-11 · kern-obs — observabilité — deux moitiés distinctes
 **Décision** : **OpenTelemetry (conventions GenAI)** comme frontière neutre ; **LangSmith écarté**
 (propriétaire, non souverain, Python/JS-first, cher). → voir `OBSERVABILITY.md`. À séparer
 strictement en deux :
@@ -189,19 +197,20 @@ Agnostique : ingère l'OTLP/GenAI de **n'importe quelle** brique `kern-*`, pas s
   Alimente le futur kern-scorer (mêmes spans). *(roadmap propre au repo kern-obs)*
 
 ### 🔌 EPIC-12 · Briques externes
-- UI, Credentials vault (hors corps), Providers LLM — hors de ce repo. Contrats
-  d'intégration à définir (surtout vault → kern-link).
+- **kern-ui**, **kern-vault** (credentials, hors corps), et les **Providers LLM** (tiers) —
+  hors de ce repo. Contrats d'intégration à définir (surtout kern-vault → kern-link).
 
 ---
 
 ## Ordre suggéré (jalons)
 
-1. **Consolider le CORE** (déjà là) : finir EPIC-01 (zones/gel, resume+YAML) et EPIC-03 (tools).
-2. **Sécuriser le flux** : EPIC-06 (policies) → EPIC-07 (garde-fou) → EPIC-08 (câbler la PII
-   externe) — c'est la colonne verticale Orchestration → … → kern-link de la carte.
+1. **Consolider le CORE** (déjà là) : finir EPIC-01 (kern-orch : zones/gel, resume+YAML) et
+   EPIC-03 (kern-tools).
+2. **Sécuriser le flux** : EPIC-06 (kern-policy) → EPIC-07 (kern-guard) → EPIC-08 (câbler
+   kern-anon) — la colonne verticale kern-orch → … → kern-link de la carte.
 3. **Boucler kern-link** : EPIC-09 dès l'accès à la brique du collègue.
-4. **Contrôle & feedback** : EPIC-11 (observation) puis EPIC-05 (pilotage) et EPIC-10 (scorer).
-5. **Isolation d'exécution** : EPIC-04 (sandbox) quand les policies existent.
+4. **Contrôle & feedback** : EPIC-11 (kern-obs) puis EPIC-05 (kern-pilot) et EPIC-10 (kern-scorer).
+5. **Isolation d'exécution** : EPIC-04 (kern-exec) quand kern-policy existe.
 
 > Estimation grossière du reste (hors externes) : ~**7–9 semaines** de travail à un dev,
 > dominées par pilotage (L), observation/analyseur (L) et l'exposition tools (L). La PII est
