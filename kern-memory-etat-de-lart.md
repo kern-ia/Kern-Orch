@@ -58,7 +58,15 @@ diff-able en git**, à côté du vecteur (opaque) et du graphe. Proche de l'« a
 Letta, mais **fichier + versionné** plutôt que boîte noire — précieux pour la conformité (audit
 trail, cf. positionnement régulé).
 
-## 6. Direction proposée pour kern-memory (à valider au brainstorm)
+## ✅ Décision (brainstorm 2026-07-22)
+
+Tranché : **kern-memory 100 % Go natif** (ni Cognee ni Graphiti adoptés — cohérence
+single-binary/souverain), store vecteur par défaut **chromem-go** (pgvector/Qdrant en option
+scale via le même contrat), **graphe/DAG léger en Go dès la phase 1** (sur SQLite/Postgres),
+**embeddings pluggables via env** (défaut modèle local self-host). Détails de mise en œuvre et
+découpage : ROADMAP **EPIC-13**. La section ci-dessous reste l'analyse ayant mené à ce choix.
+
+## 6. Direction proposée pour kern-memory (analyse ayant mené à la décision)
 
 Brique **agnostique**, contrat neutre `query/write`, backends **pluggables via env** (comme
 kern-link / kern-obs). On **n'écrit pas** d'embeddings ni de vector DB — on compose.
