@@ -1,7 +1,7 @@
 # Kern-Orch — Cartographie & épics par module
 
 > Situe **Kern-Orch** (ce repo) dans l'écosystème cible « Kern » et détaille le travail
-> restant, module par module, pour s'organiser. Dernière mise à jour : 2026-07-22.
+> restant, module par module, pour s'organiser. Dernière mise à jour : 2026-07-23.
 
 ## Principe : des briques autonomes et agnostiques
 
@@ -15,13 +15,13 @@ La famille (noms) :
 
 | Brique | Rôle | Statut |
 |---|---|---|
-| **kern-orch** | orchestration (ce repo) | ✅ moteur |
+| **kern-orch** | orchestration (ce repo) | ✅ moteur · EPIC-01 clos (v0.3.0) |
+| **kern-memory** | mémoire agnostique (.okf · RAG · DAG) | ⬜ décidé (brainstorm) · épic ouvert |
 | **kern-anon** | anonymisation / PII (Presidio) | 🔌 externe · faite |
 | **kern-link** | passage LLM multi-provider (point unique) | 🔌 externe · client fait |
 | **kern-obs** | observabilité agnostique | ⬜ module à part · en cours |
 | **kern-skills** | registre des skills (SKILL.md) | ✅ *(sous-package de kern-orch, extractible)* |
 | **kern-tools** | bibliothèque de tools | 🟡 *(sous-package de kern-orch, extractible)* |
-| **kern-memory** | gestion mémoire agnostique (`.okf` · RAG · DAG) | ⬜ **cadrée · 100 % Go · à implémenter** |
 | **kern-pilot** | canal de pilotage (steer · queue · replan · nudge) | ⬜ |
 | **kern-policy** | policies & permissions (règles · budgets · escalade) | ⬜ |
 | **kern-guard** | garde-fou structurel (inline · bloquant) | ⬜ |
@@ -52,16 +52,16 @@ flowchart TB
   subgraph CORE["CORE — briques kern-* indépendantes"]
     direction TB
     PILOT["kern-pilot<br/>canal de pilotage<br/>steer · queue · replan · nudge<br/>⬜ à faire"]:::todo
-    ORCH["kern-orch (ce repo)<br/>orchestration · tâches courtes · zones de contexte<br/>gel = respawn contexte frais<br/>✅ EPIC-01 complet"]:::done
+    ORCH["kern-orch (ce repo)<br/>orchestration · tâches courtes · zones de contexte<br/>gel = respawn contexte frais<br/>✅ EPIC-01 clos · v0.3.0"]:::done
     SKILLS["kern-skills<br/>registre des skills<br/>✅ fait"]:::done
     TOOLS["kern-tools<br/>bibliothèque de tools<br/>🟡 partiel"]:::partial
-    MEM["kern-memory<br/>mémoire agnostique · 100 % Go<br/>.okf + chromem-go + graphe léger<br/>⬜ cadrée · à implémenter"]:::todo
     EXEC["kern-exec<br/>exécution terminal / sandbox<br/>⬜ à faire"]:::todo
     POL["kern-policy<br/>règles · budgets · escalade<br/>⬜ à faire"]:::todo
     GUARD["kern-guard<br/>garde-fou structurel · inline · bloquant<br/>⬜ à faire"]:::todo
     PII["kern-anon<br/>anonymisation / PII (Presidio)<br/>🔌 externe · ✅ fait · ⬜ intégration"]:::extdone
     LINK["kern-link<br/>stream &amp; multi-provider · point unique<br/>🔌 externe · client agentrunner ✅"]:::link
     SCORER["kern-scorer<br/>scorer sémantique · async · score / alerte<br/>⬜ à faire"]:::todo
+    MEM["kern-memory<br/>mémoire agnostique · .okf · RAG · DAG<br/>défaut chromem-go · 100% Go<br/>⬜ décidé · épic ouvert"]:::todo
 
     subgraph OBS["kern-obs — observabilité (brique agnostique · en cours)"]
       direction TB
@@ -79,7 +79,8 @@ flowchart TB
   SKILLS --> ORCH
   TOOLS --> ORCH
   EXEC --> ORCH
-  MEM -. contexte/rappel .-> ORCH
+  MEM -. contexte / rappels .-> ORCH
+  ORCH -. mémorise .-> MEM
   ORCH --> GUARD --> PII --> LINK --> PROV
   OBS -. feedback .-> PILOT
   LINK -. télémétrie .-> OBS
@@ -90,7 +91,6 @@ flowchart TB
   classDef partial fill:#fef9c3,stroke:#ca8a04,color:#3f2d02;
   classDef todo fill:#f1f5f9,stroke:#94a3b8,color:#334155,stroke-dasharray:4 3;
   classDef link fill:#bfdbfe,stroke:#2563eb,color:#0f2a52,stroke-width:2px;
-  classDef brainstorm fill:#f3e8ff,stroke:#7c3aed,color:#3b1668,stroke-dasharray:2 2;
   classDef extdone fill:#bbf7d0,stroke:#15803d,color:#052e16,stroke-width:2px,stroke-dasharray:5 4;
   classDef ext fill:#e5e7eb,stroke:#9ca3af,color:#374151,stroke-dasharray:5 4;
 ```
@@ -102,16 +102,18 @@ flowchart TB
 Chaque module = un épic. Taille indicative : **S** (~jours), **M** (~1–2 semaines),
 **L** (~3 semaines +). Les dépendances pointent vers ce qui doit exister avant.
 
-### ✅ EPIC-01 · kern-orch — Orchestration (moteur) — *ce repo, COMPLET*
+### ✅ EPIC-01 · kern-orch — Orchestration (moteur) — *ce repo, CLOS — v0.3.0*
 Rôle : possède le graphe, le state, le routage, les checkpoints. Cœur agnostique métier.
 - [x] State partagé sérialisable, Node (tool/agent/subgraph), edges Go-purs, fan-out
 - [x] Checkpoints SQLite + reprise (`resume`)
 - [x] Sous-graphes / sous-agents
-- [x] **Zones de contexte & « gel = respawn contexte frais »** — zones sur le State
-  (persistant/éphémère) + `Freeze` (carry-over pluggable) exposé en tool `freeze` (okf-0009)
-- [x] **Persistance du chemin YAML dans le checkpoint** → `resume <run-id>` sans re-fournir le
-  graphe (okf-0008)
-- Dépendances : aucune. **EPIC-01 clôturé (2026-07-22).**
+- [x] **Zones de contexte & « gel = respawn contexte frais »** — `State` à zones (persistant/éphémère),
+  `Freeze(carry)` respawn un contexte frais (compteur `Frozen`), exposé en tool builtin `freeze`
+  (`examples/freeze.yaml`). Fiche okf-0009. *(livré)*
+- [x] Persistance du chemin YAML dans le checkpoint → `resume <run-id>` sans re-fournir le graphe.
+  Fiche okf-0008. *(livré)*
+- Dépendances : aucune.
+- **Clôture** : merge dev→main, tag **v0.3.0** (2026-07-22). Tout vert sous `go test -race`, E2E binaire.
 
 ### ✅ EPIC-02 · kern-skills — registre des skills — *fait (sous-package de kern-orch)*
 Rôle : catalogue des capacités (SKILL.md, `type: tool|agent`).
@@ -178,7 +180,7 @@ Rôle : scorer les échanges (qualité/dérive) en asynchrone, émettre des aler
 
 ### EPIC-11 · kern-obs — observabilité — deux moitiés distinctes
 **Décision** : **OpenTelemetry (conventions GenAI)** comme frontière neutre ; **LangSmith écarté**
-(propriétaire, non souverain, Python/JS-first, cher). → voir `OBSERVABILITY.md`. À séparer
+(propriétaire, non souverain, Python/JS-first, cher). → voir `brainstorming/OBSERVABILITY.md`. À séparer
 strictement en deux :
 
 **11a — côté kern-orch (émission, DANS ce repo) — S–M**
@@ -200,57 +202,47 @@ Agnostique : ingère l'OTLP/GenAI de **n'importe quelle** brique `kern-*`, pas s
 - Frontière : **OTLP uniquement**. kern-obs ne connaît jamais le code de kern-orch.
   Alimente le futur kern-scorer (mêmes spans). *(roadmap propre au repo kern-obs)*
 
-### 🧠 EPIC-13 · kern-memory — mémoire agnostique — *cadrée (brainstorm 2026-07-22), à implémenter*
-Brique `kern-*` autonome et agnostique : fournit contexte et rappel à **n'importe quelle** brique
-via un contrat neutre. État de l'art : `kern-memory-etat-de-lart.md`.
-
-**Décisions du brainstorm (2026-07-22)** — cf. make-vs-adopt :
-- **100 % Go natif** (cohérent single-binary/souverain ; on n'adopte ni Cognee ni Graphiti).
-- Store vecteur par défaut **chromem-go** (embarqué, zéro service) ; **pgvector / Qdrant** en
-  option scale via le même contrat.
-- **Graphe / DAG léger en Go dès la phase 1** (sur SQLite/Postgres) — pas différé.
-- **Embeddings pluggables via env**, défaut modèle **local self-host** (option API externe).
-
-**Phase 1 — S1 (fondations) — M**
-- [ ] Contrat neutre `Memory` : `Write(mémoire)` / `Query(contexte)` — agnostique, backends
-  pluggables via env (comme kern-link/kern-obs) ; défaut off = no-op **S**
-- [ ] Couche **`.okf`** : mémoire déclarative versionnée/auditable (format + indexation ;
-  s'appuyer sur les fiches OKF existantes) **M**
-- [ ] Couche **vecteur** : adapter **chromem-go** (embarqué) derrière le contrat ; interface
-  **embeddings pluggable** (défaut local) **M**
-
-**Phase 1 — S2 (graphe + routage) — M–L**
-- [ ] Couche **graphe/DAG léger en Go** (entités/relations sur SQLite/Postgres ; multi-hop,
-  provenance ; temporel = étude) **L**
-- [ ] **Routage** de requête → couche adaptée (factoïde→vecteur, multi-hop→graphe,
-  déclaratif→.okf) **M**
-- [ ] Adapters **scale** optionnels : pgvector / Qdrant derrière le contrat vecteur **M**
-
-**Transverses (dès phase 1)**
-- [ ] Intégration **kern-anon** : mémoriser du **pseudonymisé** **S**
-- [ ] Intégration **kern-obs** : **tracer les rappels** (spans) **S**
-
-**Reste à préciser** (détails, non bloquants) : format exact `.okf`, seuil de bascule
-chromem-go → pgvector/Qdrant, couplage éventuel du graphe mémoire avec les sous-graphes
-kern-orch, frontière court terme (state/checkpoints) vs long terme (cross-run/cross-agent).
-- Dépendances : contrat avec kern-orch (contexte/rappel), kern-anon, kern-obs.
-
 ### 🔌 EPIC-12 · Briques externes
 - **kern-ui**, **kern-vault** (credentials, hors corps), et les **Providers LLM** (tiers) —
   hors de ce repo. Contrats d'intégration à définir (surtout kern-vault → kern-link).
+
+### ⬜ EPIC-13 · kern-memory — mémoire agnostique (.okf · RAG · DAG)
+Rôle : brique **agnostique** de mémoire, contrat neutre `write(mémoire)` / `query(contexte)`,
+backends **pluggables via env** (comme kern-link / kern-obs). On **compose**, on ne réécrit ni
+embeddings ni vector DB. **Décision brainstorm 2026-07-22** : **100 % Go natif** (ni Cognee ni
+Graphiti adoptés — cohérence single-binary/souverain) ; store vecteur défaut **chromem-go**
+(pgvector/Qdrant en option scale, même contrat) ; embeddings pluggables via env. → cf.
+`brainstorming/kern-memory-etat-de-lart.md`.
+
+**Phase 1 — `.okf` + vecteur — M**
+- [ ] Contrat neutre `write`/`query` + routage par type de requête **S**
+- [ ] Couche **`.okf`** (déclarative, versionnée, auditable — notre différenciateur) **M**
+- [ ] Couche **vecteur** via chromem-go (défaut embarqué), backends pgvector/Qdrant pluggables **M**
+- [ ] Transverses dès la phase 1 : intégration **kern-anon** (mémoriser du pseudonymisé) +
+  **kern-obs** (rappels tracés) **S**
+
+**Phase 2 — graphe / DAG — M–L**
+- [ ] Couche graphe (multi-hop, provenance, temporel) **M**
+- [ ] **À trancher** : make (graphe léger Go sur Postgres) vs adopt (Graphiti en subprocess) **—**
+
+- **Questions ouvertes** (avant de coder) : schéma/granularité `.okf` et lien avec les fiches OKF
+  existantes ; seuil de bascule chromem-go → pgvector/Qdrant ; graphe couplé au graphe
+  d'exécution kern-orch ou store séparé.
+- Dépendances : EPIC-01 ; transverses EPIC-08 (kern-anon) et EPIC-11 (kern-obs) pour la phase 1.
 
 ---
 
 ## Ordre suggéré (jalons)
 
-1. **Consolider le CORE** (déjà là) : finir EPIC-01 (kern-orch : zones/gel, resume+YAML) et
-   EPIC-03 (kern-tools).
+1. **Consolider le CORE** : ✅ EPIC-01 clos (v0.3.0) → reste **EPIC-03** (kern-tools).
 2. **Sécuriser le flux** : EPIC-06 (kern-policy) → EPIC-07 (kern-guard) → EPIC-08 (câbler
    kern-anon) — la colonne verticale kern-orch → … → kern-link de la carte.
 3. **Boucler kern-link** : EPIC-09 dès l'accès à la brique du collègue.
 4. **Contrôle & feedback** : EPIC-11 (kern-obs) puis EPIC-05 (kern-pilot) et EPIC-10 (kern-scorer).
-5. **Isolation d'exécution** : EPIC-04 (kern-exec) quand kern-policy existe.
+5. **Mémoire** : EPIC-13 (kern-memory) phase 1 (`.okf` + chromem-go) — s'appuie sur EPIC-08/11 pour les transverses.
+6. **Isolation d'exécution** : EPIC-04 (kern-exec) quand kern-policy existe.
 
-> Estimation grossière du reste (hors externes) : ~**7–9 semaines** de travail à un dev,
-> dominées par pilotage (L), observation/analyseur (L) et l'exposition tools (L). La PII est
-> désormais externe (reste l'intégration, M) et non plus un développement complet.
+> Estimation grossière du reste (hors externes) : ~**9–11 semaines** de travail à un dev,
+> dominées par pilotage (L), observation/analyseur (L), exposition tools (L) et kern-memory
+> (M–L, deux phases). La PII est désormais externe (reste l'intégration, M) et non plus un
+> développement complet.
