@@ -125,12 +125,11 @@ sink needs no knowledge of kern-orch beyond the schema below. Today's consumer i
 
 #### `StepEvent` — contract `kern.step-event/v1`
 
-<!-- CANONICAL BLOCK — the JSON example and the field table below are byte-identical
-     in Kern-UI/README.md and Kern-Orch/README.md. The two bricks share no code by design,
-     so the schema is mirrored, not imported: any change must land in both, same breath.
-     Check with:
-       diff <(sed -n '/CANONICAL BLOCK/,/^| .at. |/p' Kern-UI/README.md) \
-            <(sed -n '/CANONICAL BLOCK/,/^| .at. |/p' Kern-Orch/README.md) -->
+<!-- CANONICAL BLOCK — mirrored verbatim in Kern-UI/README.md and Kern-Orch/README.md.
+     Drift is caught by tests, not by discipline: the same payload lives in
+     contracts/kern.step-event.v1.json in both repos, and each side asserts against it
+     on every CI run — kern-orch that its reporter emits exactly this, kern-ui that its
+     ingestion accepts exactly this. Change the contract and both suites go red. -->
 
 ```json
 {
