@@ -46,3 +46,21 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
   suppressions ni le compteur `Frozen`. Fix : frontière **mono-nœud → remplacement** par la
   branche (elle contient déjà tout le state) ; **fan-out (>1) → merge additif**. Piège de
   moteur graphe à retenir : un merge additif ne peut pas modéliser un « reset/gel » de contexte.
+
+## 2026-07-26 — step-reporter
+
+**A fonctionné**
+- Traiter le reporter comme de l'infra (`internal/report`) et non comme du câblage dans
+  `cmd` : la direction de dépendance reste celle du reste du repo, report → graph.
+- Tester d'abord les modes de panne (sink 500, injoignable, URL invalide, hôte inexistant)
+  plutôt que le chemin heureux : c'est ce qui a figé la règle « le hook retourne toujours nil ».
+- Vérifier au binaire contre un vrai kern-ui, pas seulement contre un httptest.
+
+**À surveiller**
+- `Engine.OnStep` n'a qu'un seul slot. Tant qu'il reste ainsi, tout nouvel observateur doit
+  passer par `multiStep` côté appelant. Si les observateurs se multiplient, c'est le signal
+  qu'`OnStep` devrait accepter une liste — mais c'est une modification de `graph`, à peser.
+- Le reporter est synchrone : un sink lent ralentit le graphe, borné par un timeout de 2 s
+  par niveau. Acceptable en local ; à revoir si le sink devient distant.
+- Le state traverse aplati. Si un jour les zones ou le compteur de gel intéressent un
+  observateur, c'est un ajout explicite au contrat, pas une sérialisation du State.
