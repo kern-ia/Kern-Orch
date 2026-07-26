@@ -1,0 +1,8 @@
+{
+  "run_id": "a23ead5373d9b746",
+  "graph": "hello",
+  "step": 4,
+  "frontier": ["synthese"],
+  "at": "2026-07-26T12:00:09Z",
+  "error": { "message": "agent synthese: exit status 1" }
+}

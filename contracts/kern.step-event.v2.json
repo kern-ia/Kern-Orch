@@ -1,0 +1,20 @@
+{
+  "run_id": "a23ead5373d9b746",
+  "graph": "hello",
+  "step": 2,
+  "frontier": ["synthese", "critique"],
+  "state": { "echo": "..." },
+  "at": "2026-07-26T12:00:02Z",
+  "topology": {
+    "entry": "greet",
+    "nodes": [
+      { "id": "greet", "kind": "agent" },
+      { "id": "synthese", "kind": "agent" },
+      { "id": "critique", "kind": "tool" }
+    ],
+    "edges": [
+      { "from": "greet", "to": ["synthese", "critique"] },
+      { "from": "critique", "dynamic": true }
+    ]
+  }
+}

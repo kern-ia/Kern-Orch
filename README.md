@@ -123,12 +123,12 @@ The URL is the whole contract: kern-orch knows nothing of the sink's route shape
 sink needs no knowledge of kern-orch beyond the schema below. Today's consumer is
 [`kern-ui`](../Kern-UI/README.md).
 
-#### `StepEvent` — contract `kern.step-event/v1`
+#### `StepEvent` — contract `kern.step-event/v2`
 
 <!-- CANONICAL BLOCK — mirrored verbatim in Kern-UI/README.md and Kern-Orch/README.md.
-     Drift is caught by tests, not by discipline: the same payload lives in
-     contracts/kern.step-event.v1.json in both repos, and each side asserts against it
-     on every CI run — kern-orch that its reporter emits exactly this, kern-ui that its
+     Drift is caught by tests, not by discipline: the same payloads live in
+     contracts/kern.step-event.v2*.json in both repos, and each side asserts against them on
+     every CI run — kern-orch that its reporter emits exactly this, kern-ui that its
      ingestion accepts exactly this. Change the contract and both suites go red. -->
 
 ```json
@@ -138,7 +138,12 @@ sink needs no knowledge of kern-orch beyond the schema below. Today's consumer i
   "step": 2,
   "frontier": ["synthese", "critique"],
   "state": { "echo": "..." },
-  "at": "2026-07-26T12:00:02Z"
+  "at": "2026-07-26T12:00:02Z",
+  "topology": {
+    "entry": "greet",
+    "nodes": [{ "id": "greet", "kind": "agent" }],
+    "edges": [{ "from": "greet", "to": ["synthese"] }]
+  }
 }
 ```
 
@@ -150,6 +155,11 @@ sink needs no knowledge of kern-orch beyond the schema below. Today's consumer i
 | `frontier` | string[] | yes | The nodes to execute **next**. An empty list means the run is over. |
 | `state` | object | no | Flat business data. Never a producer's internal envelope. |
 | `at` | RFC 3339 | yes | When the level completed. |
+| `topology` | object | no | The graph's shape. Sent **once**, on the run's first event. |
+| `topology.entry` | string | yes | Entry node id. Never appears in a frontier — it ran first. |
+| `topology.nodes[]` | object | yes | `id` and `kind` (`tool` / `agent` / `subgraph`). |
+| `topology.edges[]` | object | no | `from`, `to[]`, or `dynamic: true` when a router picks the targets at run time. |
+| `error` | object | no | Set on the terminal event of a run that failed; `message` is required. |
 
 kern-orch fills `graph` with the topology file name minus its extension, and `state`
 through `State.Keys()`/`Get()` — the wire form of `graph.State` (zones, freeze counter)
