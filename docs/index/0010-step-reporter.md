@@ -35,3 +35,15 @@ kern-ui, qui affiche les runs en direct.
 **E2E** : `hello`, `freeze`, `parent` et `child` exécutés au binaire contre un kern-ui réel,
 runs affichés en direct dans le navigateur. Vérifié aussi avec le sink éteint puis avec une
 URL invalide : erreurs sur stderr, runs terminés, code de sortie 0.
+
+## Contrat exécutable (2026-07-26)
+
+`contracts/kern.step-event.v1.json` — même fichier dans les deux repos.
+`internal/report/contract_test.go` capture ce que le vrai Hook met sur le fil et le compare
+à la fixture ; côté kern-ui, `internal/httpapi/contract_test.go` la fait passer par la vraie
+route d'ingestion. Renommer un champ d'un côté fait rougir les deux suites — vérifié en
+cassant délibérément `graph` → `graph_name`.
+
+Décision : **la dérive de contrat est attrapée par des tests, pas par de la discipline.** Une
+commande `diff` à lancer à la main reposait sur le fait de s'en souvenir, ce qui est
+précisément la panne qu'elle prétendait éviter.

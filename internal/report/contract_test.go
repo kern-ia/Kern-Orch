@@ -1,0 +1,78 @@
+package report
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+	"time"
+
+	"github.com/yoann/kern-orch/internal/graph"
+)
+
+// contractFixture is the canonical kern.step-event/v1 payload. The identical file lives in
+// Kern-UI/contracts/, where a mirror test asserts that ingestion accepts exactly this. The
+// two bricks share no code by design, so this fixture is the whole agreement between them:
+// if either side drifts, one of the two tests goes red.
+const contractFixture = "../../contracts/kern.step-event.v1.json"
+
+// The assertion runs against what the real Hook actually puts on the wire, not against a
+// hand-built struct — a struct would only test itself.
+func TestReporterEmitsTheContractFixture(t *testing.T) {
+	want := map[string]any{}
+	raw, err := os.ReadFile(filepath.FromSlash(contractFixture))
+	if err != nil {
+		t.Fatalf("read the contract fixture: %v", err)
+	}
+	if err := json.Unmarshal(raw, &want); err != nil {
+		t.Fatalf("the fixture is not valid JSON: %v", err)
+	}
+
+	s := newSink(t, http.StatusAccepted)
+	r := NewHTTP(s.server.URL)
+	r.now = func() time.Time { return time.Date(2026, 7, 26, 12, 0, 2, 0, time.UTC) }
+
+	// Reproduce exactly the run the fixture describes.
+	state := graph.NewState()
+	state.Set("echo", "...")
+
+	hook := r.Hook("a23ead5373d9b746", "hello")
+	err = hook(context.Background(), graph.StepInfo{
+		Step:     2,
+		Frontier: []string{"synthese", "critique"},
+	}, state)
+	if err != nil {
+		t.Fatalf("hook: %v", err)
+	}
+
+	got := s.last()
+	if got == nil {
+		t.Fatal("the reporter posted nothing")
+	}
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the emitted payload has drifted from the published contract.\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+// Field names are the contract. Renaming one in the struct would keep DeepEqual honest,
+// but this spells out which keys a sink is entitled to rely on.
+func TestContractFieldNames(t *testing.T) {
+	s := newSink(t, http.StatusAccepted)
+	r := NewHTTP(s.server.URL)
+	r.now = fixedNow
+
+	state := graph.NewState()
+	state.Set("echo", "...")
+	_ = r.Hook("run", "g")(context.Background(),
+		graph.StepInfo{Step: 1, Frontier: []string{"a"}}, state)
+
+	for _, key := range []string{"run_id", "graph", "step", "frontier", "state", "at"} {
+		if _, ok := s.last()[key]; !ok {
+			t.Errorf("field %q is missing from the payload", key)
+		}
+	}
+}
