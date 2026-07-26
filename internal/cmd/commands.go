@@ -9,6 +9,7 @@ import (
 
 	"github.com/yoann/kern-orch/internal/config"
 	"github.com/yoann/kern-orch/internal/graph"
+	"github.com/yoann/kern-orch/internal/report"
 	"github.com/yoann/kern-orch/internal/skills"
 	"github.com/yoann/kern-orch/internal/topology"
 )
@@ -37,7 +38,10 @@ func newRunCmd() *cobra.Command {
 
 			runID := newRunID()
 			err = graph.NewEngine(g).
-				OnStep(checkpointHook(store, runID, graphPath)).
+				OnStep(multiStep(
+					checkpointHook(store, runID, graphPath),
+					report.NewHTTP(cfg.StepReportURL).Hook(runID, graphName(graphPath)),
+				)).
 				Run(cmd.Context(), graph.NewState())
 			if err != nil {
 				fmt.Fprintf(cmd.OutOrStdout(), "run %s failed at last checkpoint: %v\n", runID, err)
@@ -88,7 +92,10 @@ func newResumeCmd() *cobra.Command {
 				return err
 			}
 			if err := graph.NewEngine(g).
-				OnStep(checkpointHook(store, runID, graphPath)).
+				OnStep(multiStep(
+					checkpointHook(store, runID, graphPath),
+					report.NewHTTP(cfg.StepReportURL).Hook(runID, graphName(graphPath)),
+				)).
 				RunFrom(cmd.Context(), rec.State, rec.Frontier); err != nil {
 				return err
 			}

@@ -257,6 +257,9 @@ classDiagram
 - **Contrat provisoire** : 1 `Request` sur stdin, des `Event` `{token · result · error}` par
   ligne sur stdout ; à réconcilier avec la vraie CLI.
 - Sélection au runtime : `Subprocess` si `KERN_AGENT_CLI` est défini, sinon `Stub`.
+- Report des transitions : `internal/report` poste chaque niveau terminé vers
+  `KERN_STEP_REPORT_URL` si la variable est définie. Best-effort — le hook ne remonte
+  jamais d'erreur au moteur. Composé avec le hook de checkpoint via `multiStep`.
 
 ---
 

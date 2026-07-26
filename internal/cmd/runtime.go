@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/yoann/kern-orch/internal/agentrunner"
 	"github.com/yoann/kern-orch/internal/checkpoint"
@@ -76,6 +77,30 @@ func checkpointHook(store *checkpoint.SQLiteStore, runID, graphPath string) grap
 			Status: status, GraphPath: graphPath,
 		})
 	}
+}
+
+// multiStep chains several step hooks into the single one Engine.OnStep accepts. Hooks run
+// in the order given and the first error aborts the run, so durability comes first and
+// best-effort observers last. Nil hooks are skipped, which lets a caller pass a disabled
+// reporter without branching.
+func multiStep(hooks ...graph.StepFunc) graph.StepFunc {
+	return func(ctx context.Context, info graph.StepInfo, s *graph.State) error {
+		for _, hook := range hooks {
+			if hook == nil {
+				continue
+			}
+			if err := hook(ctx, info, s); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+}
+
+// graphName is the label the UI shows for a run: the topology file without its extension.
+func graphName(graphPath string) string {
+	base := filepath.Base(graphPath)
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
 // newRunID returns a short random run identifier.
