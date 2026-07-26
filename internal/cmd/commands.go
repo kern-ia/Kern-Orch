@@ -37,13 +37,19 @@ func newRunCmd() *cobra.Command {
 			defer store.Close()
 
 			runID := newRunID()
+			name := graphName(graphPath)
+			reporter := report.NewHTTP(cfg.StepReportURL)
+			steps := &stepCounter{}
+
 			err = graph.NewEngine(g).
 				OnStep(multiStep(
 					checkpointHook(store, runID, graphPath),
-					report.NewHTTP(cfg.StepReportURL).Hook(runID, graphName(graphPath)),
+					steps.count,
+					reporter.Hook(runID, name, describeTopology(graphPath)),
 				)).
 				Run(cmd.Context(), graph.NewState())
 			if err != nil {
+				reporter.ReportFailure(cmd.Context(), runID, name, steps.last, steps.frontier, err.Error())
 				fmt.Fprintf(cmd.OutOrStdout(), "run %s failed at last checkpoint: %v\n", runID, err)
 				fmt.Fprintf(cmd.OutOrStdout(), "resume with: kern-orch resume %s\n", runID)
 				return err
@@ -91,12 +97,18 @@ func newResumeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			name := graphName(graphPath)
+			reporter := report.NewHTTP(cfg.StepReportURL)
+			steps := &stepCounter{last: rec.Step}
+
 			if err := graph.NewEngine(g).
 				OnStep(multiStep(
 					checkpointHook(store, runID, graphPath),
-					report.NewHTTP(cfg.StepReportURL).Hook(runID, graphName(graphPath)),
+					steps.count,
+					reporter.Hook(runID, name, describeTopology(graphPath)),
 				)).
 				RunFrom(cmd.Context(), rec.State, rec.Frontier); err != nil {
+				reporter.ReportFailure(cmd.Context(), runID, name, steps.last, steps.frontier, err.Error())
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "run %s resumed and completed\n", runID)

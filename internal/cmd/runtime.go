@@ -12,6 +12,7 @@ import (
 	"github.com/yoann/kern-orch/internal/checkpoint"
 	"github.com/yoann/kern-orch/internal/config"
 	"github.com/yoann/kern-orch/internal/graph"
+	"github.com/yoann/kern-orch/internal/report"
 	"github.com/yoann/kern-orch/internal/topology"
 )
 
@@ -103,9 +104,41 @@ func graphName(graphPath string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
+// describeTopology reads the graph's declared shape for the reporter. A failure here is
+// never fatal: the run matters, drawing it does not.
+func describeTopology(graphPath string) *report.Topology {
+	d, err := topology.DescribeFile(graphPath)
+	if err != nil {
+		return nil
+	}
+
+	topo := &report.Topology{Entry: d.Entry}
+	for _, n := range d.Nodes {
+		topo.Nodes = append(topo.Nodes, report.TopologyNode{ID: n.ID, Kind: n.Kind})
+	}
+	for _, e := range d.Edges {
+		topo.Edges = append(topo.Edges, report.TopologyEdge{From: e.From, To: e.To, Dynamic: e.Dynamic})
+	}
+	return topo
+}
+
 // newRunID returns a short random run identifier.
 func newRunID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
+}
+
+// stepCounter remembers where the run had got to, so a failure can be reported against it.
+// The engine returns its error from Run, long after the last hook fired — by then the level
+// and the frontier are gone unless something kept them.
+type stepCounter struct {
+	last     int
+	frontier []string
+}
+
+func (c *stepCounter) count(_ context.Context, info graph.StepInfo, _ *graph.State) error {
+	c.last = info.Step
+	c.frontier = info.Frontier
+	return nil
 }

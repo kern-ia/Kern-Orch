@@ -39,7 +39,7 @@ func TestReporterEmitsTheContractFixture(t *testing.T) {
 	state := graph.NewState()
 	state.Set("echo", "...")
 
-	hook := r.Hook("a23ead5373d9b746", "hello")
+	hook := r.Hook("a23ead5373d9b746", "hello", nil)
 	err = hook(context.Background(), graph.StepInfo{
 		Step:     2,
 		Frontier: []string{"synthese", "critique"},
@@ -67,7 +67,7 @@ func TestContractFieldNames(t *testing.T) {
 
 	state := graph.NewState()
 	state.Set("echo", "...")
-	_ = r.Hook("run", "g")(context.Background(),
+	_ = r.Hook("run", "g", nil)(context.Background(),
 		graph.StepInfo{Step: 1, Frontier: []string{"a"}}, state)
 
 	for _, key := range []string{"run_id", "graph", "step", "frontier", "state", "at"} {

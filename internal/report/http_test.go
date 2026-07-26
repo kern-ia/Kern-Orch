@@ -68,7 +68,7 @@ func TestHookPostsTheStepEvent(t *testing.T) {
 	state := graph.NewState()
 	state.Set("topic", "kern-ui")
 
-	hook := r.Hook("run-42", "review")
+	hook := r.Hook("run-42", "review", nil)
 	if err := hook(context.Background(), graph.StepInfo{Step: 2, Frontier: []string{"a", "b"}}, state); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestHookReportsAnEmptyFrontierSoTheSinkCanCloseTheRun(t *testing.T) {
 	r := NewHTTP(s.server.URL)
 	r.now = fixedNow
 
-	if err := r.Hook("run-42", "review")(context.Background(), graph.StepInfo{Step: 3}, graph.NewState()); err != nil {
+	if err := r.Hook("run-42", "review", nil)(context.Background(), graph.StepInfo{Step: 3}, graph.NewState()); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestHookCarriesTheState(t *testing.T) {
 	state := graph.NewState()
 	state.Set("topic", "kern-ui")
 
-	_ = r.Hook("run-42", "review")(context.Background(), graph.StepInfo{Step: 1, Frontier: []string{"a"}}, state)
+	_ = r.Hook("run-42", "review", nil)(context.Background(), graph.StepInfo{Step: 1, Frontier: []string{"a"}}, state)
 
 	got, ok := s.last()["state"].(map[string]any)
 	if !ok || got["topic"] != "kern-ui" {
@@ -147,7 +147,7 @@ func TestHookNeverFailsTheRun(t *testing.T) {
 			r.now = fixedNow
 			r.Timeout = 200 * time.Millisecond
 
-			err := r.Hook("run-42", "review")(context.Background(), graph.StepInfo{Step: 1}, graph.NewState())
+			err := r.Hook("run-42", "review", nil)(context.Background(), graph.StepInfo{Step: 1}, graph.NewState())
 			if err != nil {
 				t.Errorf("hook returned %v, want nil — a reporter must never abort a run", err)
 			}
@@ -156,7 +156,7 @@ func TestHookNeverFailsTheRun(t *testing.T) {
 }
 
 func TestHookIsNilWhenNoURLIsConfigured(t *testing.T) {
-	if hook := NewHTTP("").Hook("run-42", "review"); hook != nil {
+	if hook := NewHTTP("").Hook("run-42", "review", nil); hook != nil {
 		t.Error("Hook() != nil for an unconfigured reporter, want nil so the caller can skip it")
 	}
 }
@@ -169,7 +169,7 @@ func TestHookStopsPostingOnceTheRunContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := r.Hook("run-42", "review")(ctx, graph.StepInfo{Step: 1}, graph.NewState()); err != nil {
+	if err := r.Hook("run-42", "review", nil)(ctx, graph.StepInfo{Step: 1}, graph.NewState()); err != nil {
 		t.Errorf("hook: %v, want nil", err)
 	}
 	if s.count() != 0 {
