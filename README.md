@@ -168,6 +168,20 @@ deliberately stays inside kern-orch.
 - Granularity is the level, not the node: `Engine.OnStep` fires after a whole frontier
   completes.
 
+### Asked for, not yet emitted
+
+kern-ui needs three more things from this brick, none of which requires new data — all three
+already exist inside kern-orch and are simply never published:
+
+| What | Where it already lives | Why kern-ui needs it |
+|---|---|---|
+| Run topology (nodes, edges) | `internal/topology`, `graph.Graph` | To draw a run as a graph instead of a list |
+| Per-node status, and run failure | `internal/graph` | To colour nodes, and to report a failed run at all |
+| Skills and tools registry | `internal/skills`, `internal/cmd list-skills` | Unlocks two of its views at once |
+
+Stated in full, with the other bricks' contracts, in
+[`../Kern-UI/docs/expected-contracts.md`](../Kern-UI/docs/expected-contracts.md).
+
 ### Not yet defined
 
 `kern-pilot` (steering), `kern-obs` (observability), `kern-policy`, `kern-guard`,
