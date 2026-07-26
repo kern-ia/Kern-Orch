@@ -76,3 +76,72 @@ func TestContractFieldNames(t *testing.T) {
 		}
 	}
 }
+
+const (
+	contractV2        = "../../contracts/kern.step-event.v2.json"
+	contractV2Failure = "../../contracts/kern.step-event.v2.failure.json"
+)
+
+func fixture(t *testing.T, path string) map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.FromSlash(path))
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var want map[string]any
+	if err := json.Unmarshal(raw, &want); err != nil {
+		t.Fatalf("%s is not valid JSON: %v", path, err)
+	}
+	return want
+}
+
+// Mirror of the kern-ui test: what the real Hook puts on the wire must equal the published
+// v2 fixture, byte for byte once parsed.
+func TestReporterEmitsTheV2Fixture(t *testing.T) {
+	want := fixture(t, contractV2)
+
+	s := newSink(t, http.StatusAccepted)
+	r := NewHTTP(s.server.URL)
+	r.now = func() time.Time { return time.Date(2026, 7, 26, 12, 0, 2, 0, time.UTC) }
+
+	state := graph.NewState()
+	state.Set("echo", "...")
+
+	topo := &Topology{
+		Entry: "greet",
+		Nodes: []TopologyNode{
+			{ID: "greet", Kind: "agent"},
+			{ID: "synthese", Kind: "agent"},
+			{ID: "critique", Kind: "tool"},
+		},
+		Edges: []TopologyEdge{
+			{From: "greet", To: []string{"synthese", "critique"}},
+			{From: "critique", Dynamic: true},
+		},
+	}
+
+	err := r.Hook("a23ead5373d9b746", "hello", topo)(context.Background(),
+		graph.StepInfo{Step: 2, Frontier: []string{"synthese", "critique"}}, state)
+	if err != nil {
+		t.Fatalf("hook: %v", err)
+	}
+
+	if got := s.last(); !reflect.DeepEqual(got, want) {
+		t.Errorf("the emitted payload has drifted from the published contract.\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestReporterEmitsTheV2FailureFixture(t *testing.T) {
+	want := fixture(t, contractV2Failure)
+
+	s := newSink(t, http.StatusAccepted)
+	r := NewHTTP(s.server.URL)
+	r.now = func() time.Time { return time.Date(2026, 7, 26, 12, 0, 9, 0, time.UTC) }
+
+	r.ReportFailure(context.Background(), "a23ead5373d9b746", "hello", 4,
+		[]string{"synthese"}, "agent synthese: exit status 1")
+
+	if got := s.last(); !reflect.DeepEqual(got, want) {
+		t.Errorf("the emitted failure has drifted from the published contract.\n got: %#v\nwant: %#v", got, want)
+	}
+}
