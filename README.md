@@ -82,6 +82,99 @@ go run . resume <run-id>      # continue a run after an interruption
 go run . list-skills          # see what tools/agents are registered
 ```
 
+## Connection contracts
+
+Every `kern-*` brick publishes what it accepts and states what it needs. Nothing else is
+part of the contract: internal packages, the checkpoint schema and the SQLite file may
+change without notice. **kern-orch depends on no other brick** — it exposes and consumes
+contracts, never internals.
+
+### Consumed — provider CLI (`kern-link`)
+
+kern-orch never calls an LLM itself. Each `agent` node spawns the binary named by
+`KERN_AGENT_CLI` and speaks JSON-lines over its standard streams. Unset the variable and a
+deterministic stub takes over, so the harness runs with nothing configured.
+
+> **Status: provisional.** This protocol is specified in `internal/agentrunner/protocol.go`
+> and awaits reconciliation with the real CLI. Treat it as a draft, not a stable contract.
+
+kern-orch writes exactly one request object to the child's stdin, then closes it:
+
+```json
+{"node_id":"think","prompt":"Do some work","state":{"…":"…"}}
+```
+
+The child streams events back on stdout, one JSON object per line:
+
+```json
+{"type":"token","text":"…"}      // incremental output, forwarded to the token sink
+{"type":"result","output":{…}}   // final; output is merged into the shared state
+{"type":"error","message":"…"}   // aborts the run
+```
+
+The last `result` wins. A non-zero exit with no result is an error.
+
+### Emitted — step transitions
+
+When `KERN_STEP_REPORT_URL` is set, kern-orch POSTs one event per completed graph level to
+that URL. Unset, it emits nothing and behaves exactly as before.
+
+The URL is the whole contract: kern-orch knows nothing of the sink's route shape, and the
+sink needs no knowledge of kern-orch beyond the schema below. Today's consumer is
+[`kern-ui`](../Kern-UI/README.md).
+
+#### `StepEvent` — contract `kern.step-event/v1`
+
+<!-- CANONICAL BLOCK — the JSON example and the field table below are byte-identical
+     in Kern-UI/README.md and Kern-Orch/README.md. The two bricks share no code by design,
+     so the schema is mirrored, not imported: any change must land in both, same breath.
+     Check with:
+       diff <(sed -n '/CANONICAL BLOCK/,/^| .at. |/p' Kern-UI/README.md) \
+            <(sed -n '/CANONICAL BLOCK/,/^| .at. |/p' Kern-Orch/README.md) -->
+
+```json
+{
+  "run_id": "a23ead5373d9b746",
+  "graph": "hello",
+  "step": 2,
+  "frontier": ["synthese", "critique"],
+  "state": { "echo": "..." },
+  "at": "2026-07-26T12:00:02Z"
+}
+```
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `run_id` | string | yes | Identifies the run. |
+| `graph` | string | yes | Human label for the run, shown by the consumer. |
+| `step` | int >= 0 | yes | Level counter, increases within a run. |
+| `frontier` | string[] | yes | The nodes to execute **next**. An empty list means the run is over. |
+| `state` | object | no | Flat business data. Never a producer's internal envelope. |
+| `at` | RFC 3339 | yes | When the level completed. |
+
+kern-orch fills `graph` with the topology file name minus its extension, and `state`
+through `State.Keys()`/`Get()` — the wire form of `graph.State` (zones, freeze counter)
+deliberately stays inside kern-orch.
+
+**What a sink must accept**
+
+- **Replays.** The same step may arrive twice; a sink must be idempotent.
+- **`frontier: []`** as the end-of-run marker, not a missing field.
+
+**What kern-orch guarantees**
+
+- **Reporting never fails a run.** Whatever the sink answers — 500, timeout, unreachable
+  host, malformed URL — the graph keeps going and the error goes to stderr.
+- **One POST per level, in order**, synchronous, capped at 2 s each.
+- Granularity is the level, not the node: `Engine.OnStep` fires after a whole frontier
+  completes.
+
+### Not yet defined
+
+`kern-pilot` (steering), `kern-obs` (observability), `kern-policy`, `kern-guard`,
+`kern-memory` — see [`docs/ROADMAP.md`](docs/ROADMAP.md). None of them has a contract yet;
+kern-orch exposes no endpoint for them today.
+
 ## Project layout
 
 - `internal/graph` — the core engine: steps, connections, shared state, execution order.
