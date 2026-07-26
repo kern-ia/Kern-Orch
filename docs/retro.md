@@ -64,3 +64,18 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
   par niveau. Acceptable en local ; à revoir si le sink devient distant.
 - Le state traverse aplati. Si un jour les zones ou le compteur de gel intéressent un
   observateur, c'est un ajout explicite au contrat, pas une sérialisation du State.
+
+## 2026-07-26 — topologie et échec
+
+**Ce qui a été découvert en implémentant**
+- Les arêtes du `Graph` runtime sont des `RouteFunc`. On ne peut donc pas exporter la
+  topologie depuis le moteur : il a fallu la relire du YAML. Une route conditionnelle reste
+  inconnaissable avant l'exécution, d'où le drapeau `dynamic` plutôt qu'une arête inventée.
+- Le hook `StepFunc` ne voit jamais un échec — le moteur le signale en retournant de `Run`.
+  Sans un appel dédié, un run cassé était indiscernable d'un run terminé côté sink.
+- Premier jet de `ReportFailure` : frontière vide. Résultat, le consommateur savait qu'un run
+  avait échoué mais pas où. La frontière active au moment de la casse est l'information utile.
+
+**À surveiller**
+- `stepCounter` mémorise niveau et frontière uniquement pour pouvoir rapporter l'échec. Si le
+  moteur exposait un jour l'erreur au hook, ce bricolage disparaîtrait.
