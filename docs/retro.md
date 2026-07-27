@@ -79,3 +79,21 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
 **À surveiller**
 - `stepCounter` mémorise niveau et frontière uniquement pour pouvoir rapporter l'échec. Si le
   moteur exposait un jour l'erreur au hook, ce bricolage disparaîtrait.
+
+## 2026-07-27 — registry-contract
+
+**A fonctionné**
+- `RegistryPublisher` séparé de `HTTPReporter` plutôt qu'une méthode de plus : deux
+  endpoints, deux URL, deux responsabilités. `postJSON` extrait ensuite pour que la
+  plomberie HTTP reste unique.
+- Le test qui vérifie qu'aucun champ ne transporte le répertoire du skill
+  (`TestPublisherDoesNotLeakTheSkillDirectory`) : il interdit la fuite par n'importe quel
+  nom de champ, pas seulement par `dir`.
+
+**À surveiller**
+- `DeclaredNode` jetait la référence `skill:` que `nodeSpec` lisait déjà. Un champ parsé
+  puis abandonné en cours de route est un contrat qui manque en aval sans que rien ne le
+  signale.
+- `list-skills` code en dur `"skills"` comme défaut de `--skills-dir` au lieu de
+  `config.FromEnv().SkillsDir` : `KERN_SKILLS_DIR` est donc ignoré par cette commande.
+  `publish-skills` utilise la config. À aligner.

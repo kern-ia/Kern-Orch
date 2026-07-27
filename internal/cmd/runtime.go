@@ -13,6 +13,7 @@ import (
 	"github.com/yoann/kern-orch/internal/config"
 	"github.com/yoann/kern-orch/internal/graph"
 	"github.com/yoann/kern-orch/internal/report"
+	"github.com/yoann/kern-orch/internal/skills"
 	"github.com/yoann/kern-orch/internal/topology"
 )
 
@@ -114,7 +115,7 @@ func describeTopology(graphPath string) *report.Topology {
 
 	topo := &report.Topology{Entry: d.Entry}
 	for _, n := range d.Nodes {
-		topo.Nodes = append(topo.Nodes, report.TopologyNode{ID: n.ID, Kind: n.Kind})
+		topo.Nodes = append(topo.Nodes, report.TopologyNode{ID: n.ID, Kind: n.Kind, Skill: n.Skill})
 	}
 	for _, e := range d.Edges {
 		topo.Edges = append(topo.Edges, report.TopologyEdge{From: e.From, To: e.To, Dynamic: e.Dynamic})
@@ -141,4 +142,21 @@ func (c *stepCounter) count(_ context.Context, info graph.StepInfo, _ *graph.Sta
 	c.last = info.Step
 	c.frontier = info.Frontier
 	return nil
+}
+
+// publishRegistry pushes the skills catalogue to the configured sink.
+//
+// Best-effort by design, exactly like the step reporter: the Grimoire is observability, and
+// a sink that is slow, broken or absent must never be able to stop a graph from running.
+// The caller gets the error only so it can say something useful; it must not propagate it.
+func publishRegistry(ctx context.Context, cfg config.Config, dir string) error {
+	pub := report.NewRegistryPublisher(cfg.RegistryReportURL)
+	if !pub.Enabled() {
+		return nil
+	}
+	reg, err := skills.Load(dir)
+	if err != nil {
+		return err
+	}
+	return pub.Publish(ctx, reg.List())
 }

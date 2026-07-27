@@ -8,8 +8,8 @@
   "topology": {
     "entry": "greet",
     "nodes": [
-      { "id": "greet", "kind": "agent" },
-      { "id": "synthese", "kind": "agent" },
+      { "id": "greet", "kind": "agent", "skill": "planner" },
+      { "id": "synthese", "kind": "agent", "skill": "redacteur" },
       { "id": "critique", "kind": "tool" }
     ],
     "edges": [

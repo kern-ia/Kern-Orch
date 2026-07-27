@@ -36,6 +36,12 @@ func newRunCmd() *cobra.Command {
 			}
 			defer store.Close()
 
+			// The catalogue rides along with the run so the Grimoire fills without a
+			// separate command. A failure here is worth a line on stderr and nothing more.
+			if err := publishRegistry(cmd.Context(), cfg, cfg.SkillsDir); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "kern-orch: publish skills catalogue: %v\n", err)
+			}
+
 			runID := newRunID()
 			name := graphName(graphPath)
 			reporter := report.NewHTTP(cfg.StepReportURL)
@@ -173,5 +179,33 @@ func newListSkillsCmd() *cobra.Command {
 		},
 	}
 	c.Flags().StringVar(&dir, "skills-dir", "skills", "directory containing skill subdirectories")
+	return c
+}
+
+// newPublishSkillsCmd pushes the catalogue on demand, so the Grimoire can be filled without
+// launching a graph first.
+func newPublishSkillsCmd() *cobra.Command {
+	var dir string
+	c := &cobra.Command{
+		Use:   "publish-skills",
+		Short: "Publish the skills catalogue to the configured sink (kern.registry/v1)",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg := config.FromEnv()
+			if cfg.RegistryReportURL == "" {
+				fmt.Fprintf(cmd.OutOrStdout(),
+					"no sink configured: set %s to publish the catalogue\n",
+					config.EnvRegistryReportURL)
+				return nil
+			}
+			if err := publishRegistry(cmd.Context(), cfg, dir); err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "catalogue published to %s\n", cfg.RegistryReportURL)
+			return nil
+		},
+	}
+	c.Flags().StringVar(&dir, "skills-dir", config.FromEnv().SkillsDir,
+		"directory containing skill subdirectories")
 	return c
 }

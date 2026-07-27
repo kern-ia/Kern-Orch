@@ -90,3 +90,35 @@ func edgeFrom(t *testing.T, d Declared, from string) DeclaredEdge {
 	t.Fatalf("no edge from %q", from)
 	return DeclaredEdge{}
 }
+
+// The skill a node references is what links a run back to the Grimoire's catalogue. A node
+// id is not a skill name — `id: greet` may run `skill: planner` — so without this the two
+// can only be matched by guessing.
+func TestDescribeCarriesTheSkillReference(t *testing.T) {
+	d, err := Describe([]byte(`
+entry: greet
+nodes:
+  - id: greet
+    type: agent
+    skill: planner
+  - id: finish
+    type: tool
+    func: noop
+`))
+	if err != nil {
+		t.Fatalf("Describe: %v", err)
+	}
+
+	byID := map[string]DeclaredNode{}
+	for _, n := range d.Nodes {
+		byID[n.ID] = n
+	}
+
+	if got := byID["greet"].Skill; got != "planner" {
+		t.Errorf("greet skill = %q, want planner", got)
+	}
+	// A tool node names a Go function, not a skill: leaving it blank is the honest answer.
+	if got := byID["finish"].Skill; got != "" {
+		t.Errorf("finish skill = %q, want empty", got)
+	}
+}

@@ -33,10 +33,12 @@ type Topology struct {
 	Edges []TopologyEdge `json:"edges,omitempty"`
 }
 
-// TopologyNode is one unit of work: its id and what kind of work it is.
+// TopologyNode is one unit of work: its id, what kind of work it is, and — for an agent —
+// the skill backing it. Skill is absent on tool nodes, which name a Go function instead.
 type TopologyNode struct {
-	ID   string `json:"id"`
-	Kind string `json:"kind"` // tool | agent | subgraph
+	ID    string `json:"id"`
+	Kind  string `json:"kind"` // tool | agent | subgraph
+	Skill string `json:"skill,omitempty"`
 }
 
 // TopologyEdge leaves a node towards its declared targets, or is flagged Dynamic when a
@@ -196,21 +198,32 @@ func nonNil(frontier []string) []string {
 }
 
 func (r *HTTPReporter) send(ctx context.Context, ev StepEvent) error {
-	payload, err := json.Marshal(ev)
+	return postJSONWith(ctx, r.client(), r.URL, r.timeout(), ev)
+}
+
+// postJSON marshals payload and POSTs it, using the default client. Shared by the step
+// reporter and the registry publisher: one way to talk to a sink, so a timeout or an error
+// message never depends on which contract is travelling.
+func postJSON(ctx context.Context, url string, timeout time.Duration, payload any) error {
+	return postJSONWith(ctx, http.DefaultClient, url, timeout, payload)
+}
+
+func postJSONWith(ctx context.Context, client *http.Client, url string, timeout time.Duration, payload any) error {
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, r.timeout())
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, r.URL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := r.client().Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("post: %w", err)
 	}

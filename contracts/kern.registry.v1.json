@@ -1,0 +1,16 @@
+{
+  "source": "kern-orch",
+  "at": "2026-07-27T12:00:00Z",
+  "skills": [
+    {
+      "name": "Analyse",
+      "kind": "tool",
+      "description": "Décompose une demande en éléments vérifiables."
+    },
+    {
+      "name": "Scribe",
+      "kind": "agent",
+      "description": "Rédige et reformule à partir des notes du run."
+    }
+  ]
+}
