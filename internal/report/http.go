@@ -254,5 +254,11 @@ func (r *HTTPReporter) errf(format string, args ...any) {
 		r.Errf(format, args...)
 		return
 	}
+	stderrf(format, args...)
+}
+
+// stderrf is where a delivery failure goes when no Errf is set. Shared, so a broken sink
+// reads the same whichever contract was travelling.
+func stderrf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format, args...)
 }

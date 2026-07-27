@@ -179,6 +179,54 @@ deliberately stays inside kern-orch.
 - Granularity is the level, not the node: `Engine.OnStep` fires after a whole frontier
   completes.
 
+### Emitted — agent activity
+
+When `KERN_ACTIVITY_REPORT_URL` is set, kern-orch reports each time an agent node starts and
+stops working. Unset, it reports nothing.
+
+Unlike the step reporter this one posts **off the run's thread**. A step is reported between
+levels, where a pause costs little; activity is reported at the exact moment an agent is
+about to start, and making it wait on an HTTP round trip would let observability slow down
+the thing it observes. The command flushes before exiting, because the signal that says an
+agent *stopped* is the last one a run emits and precisely the one a process exiting would
+drop.
+
+#### `ActivityEvent` — contract `kern.activity/v1`
+
+<!-- CANONICAL BLOCK — mirrored verbatim in Kern-UI/README.md and Kern-Orch/README.md.
+     The same payload lives in contracts/kern.activity.v1.json in both repos, asserted from
+     both sides on every CI run. -->
+
+```json
+{
+  "run_id": "a23ead5373d9b746",
+  "graph": "hello",
+  "node_id": "greet",
+  "generating": true,
+  "at": "2026-07-26T12:00:01Z"
+}
+```
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `run_id` | string | yes | Identifies the run. |
+| `graph` | string | yes | Human label. Required because this event routinely opens a run. |
+| `node_id` | string | yes | The node whose model started or stopped. |
+| `generating` | bool | yes | `true` when the model began working, `false` when it finished. |
+| `at` | RFC 3339 | yes | When the transition happened. |
+
+**What kern-orch guarantees**
+
+- **The bracket always closes.** The stop is deferred, so it fires on every path out of an
+  agent node — including the failing ones — and it is reported on a detached context, since
+  a run is usually already cancelled by the time its last agent stops.
+- **The bracket opens at spawn, not at the first token.** A provider that answers in one
+  piece streams no token at all, and waiting for one would report such a node as never having
+  worked. What travels is the coarse fact: the model is working.
+- **Only agent nodes report.** A tool node runs Go code; no model is involved.
+- **Signals may arrive out of order**, being sent off-thread. Each carries `at` so a sink can
+  keep only the freshest word about a node.
+
 ### Emitted — skills catalogue
 
 When `KERN_REGISTRY_REPORT_URL` is set, kern-orch POSTs its whole skills registry to that
