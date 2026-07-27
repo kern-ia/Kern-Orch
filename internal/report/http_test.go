@@ -66,7 +66,7 @@ func TestHookPostsTheStepEvent(t *testing.T) {
 	r.now = fixedNow
 
 	state := graph.NewState()
-	state.Set("topic", "kern-ui")
+	state.Set("topic", "confinement")
 
 	hook := r.Hook("run-42", "review", nil)
 	if err := hook(context.Background(), graph.StepInfo{Step: 2, Frontier: []string{"a", "b"}}, state); err != nil {
@@ -118,12 +118,12 @@ func TestHookCarriesTheState(t *testing.T) {
 	r.now = fixedNow
 
 	state := graph.NewState()
-	state.Set("topic", "kern-ui")
+	state.Set("topic", "confinement")
 
 	_ = r.Hook("run-42", "review", nil)(context.Background(), graph.StepInfo{Step: 1, Frontier: []string{"a"}}, state)
 
 	got, ok := s.last()["state"].(map[string]any)
-	if !ok || got["topic"] != "kern-ui" {
+	if !ok || got["topic"] != "confinement" {
 		t.Errorf("state = %v, want the merged state", s.last()["state"])
 	}
 }
@@ -135,7 +135,7 @@ func TestHookNeverFailsTheRun(t *testing.T) {
 		"sink returns 500":    "",
 		"sink unreachable":    "http://127.0.0.1:1/steps",
 		"url is nonsense":     "://not-a-url",
-		"host does not exist": "http://kern-ui.invalid/steps",
+		"host does not exist": "http://sink.invalid/steps",
 	}
 
 	for name, url := range cases {

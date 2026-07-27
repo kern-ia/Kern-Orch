@@ -36,7 +36,7 @@ func newRunCmd() *cobra.Command {
 			}
 			defer store.Close()
 
-			// The catalogue rides along with the run so the Grimoire fills without a
+			// The catalogue rides along with the run so a sink is fed without needing a
 			// separate command. A failure here is worth a line on stderr and nothing more.
 			if err := publishRegistry(cmd.Context(), cfg, cfg.SkillsDir); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "kern-orch: publish skills catalogue: %v\n", err)
@@ -182,8 +182,8 @@ func newListSkillsCmd() *cobra.Command {
 	return c
 }
 
-// newPublishSkillsCmd pushes the catalogue on demand, so the Grimoire can be filled without
-// launching a graph first.
+// newPublishSkillsCmd pushes the catalogue on demand, so a sink can be fed without launching
+// a graph first.
 func newPublishSkillsCmd() *cobra.Command {
 	var dir string
 	c := &cobra.Command{

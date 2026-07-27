@@ -60,6 +60,13 @@ The same skills library is used two ways: as **tools** (functions invoked by an 
 
 - **SOLID.** Respect the five principles throughout — especially single responsibility (keep node execution, routing, skill registry, subprocess handling, and persistence in separate units) and dependency inversion (depend on interfaces, e.g. the `agentrunner` subprocess boundary and the `checkpoint` store, not concrete types). This mirrors the spec's requirement to isolate node execution from the routing engine.
 - **DRY.** Do not duplicate logic. Factor shared behaviour (state serialization, stream parsing, error/retry handling) into reusable functions rather than copy-pasting across nodes, skills, or commands.
+- **No dependency on a consumer, ever.** kern-orch emits contracts; it does not know who
+  reads them. Concretely: no consumer module in `go.mod`, no shared package, no knowledge of
+  a sink's route shape (one configured URL per contract, never a sibling path derived from
+  another), and **no consumer vocabulary in the code** — a comment naming another brick's
+  screen is how a brick quietly starts assuming a single consumer. Say "a sink", "a
+  consumer", "the catalogue". Emitting is always best-effort: a broken sink costs a line on
+  stderr and never a run.
 - **Never delete without consent.** Do not remove files, functions, code, or data without explicit user approval. If something looks obsolete, propose the deletion and wait for confirmation before acting.
 
 ## Reference points (for design, not to fork)

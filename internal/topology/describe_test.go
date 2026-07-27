@@ -91,9 +91,9 @@ func edgeFrom(t *testing.T, d Declared, from string) DeclaredEdge {
 	return DeclaredEdge{}
 }
 
-// The skill a node references is what links a run back to the Grimoire's catalogue. A node
-// id is not a skill name — `id: greet` may run `skill: planner` — so without this the two
-// can only be matched by guessing.
+// The skill a node references is what links a run back to the skills catalogue. A node id
+// is not a skill name — `id: greet` may run `skill: planner` — so without this the two can
+// only be matched by guessing.
 func TestDescribeCarriesTheSkillReference(t *testing.T) {
 	d, err := Describe([]byte(`
 entry: greet
