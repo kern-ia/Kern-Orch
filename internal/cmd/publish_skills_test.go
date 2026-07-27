@@ -150,3 +150,41 @@ func TestRunSurvivesADeadRegistrySink(t *testing.T) {
 		t.Errorf("output = %q, want the run to have completed anyway", out)
 	}
 }
+
+// The activity signal has to survive the whole wiring: runner hook → relay → reporter →
+// sink. Unit tests cover each link; only this one covers the chain.
+func TestRunBracketsAgentActivity(t *testing.T) {
+	sink := newCatalogueSink(t)
+	dir := t.TempDir()
+
+	agent := filepath.Join(dir, "agent.sh")
+	script := "#!/bin/sh\ncat > /dev/null\nprintf '{\"type\":\"result\",\"output\":{}}\\n'\n"
+	if err := os.WriteFile(agent, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	graphPath := filepath.Join(dir, "g.yaml")
+	if err := os.WriteFile(graphPath, []byte(exampleGraph), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("KERN_AGENT_CLI", agent)
+	t.Setenv(config.EnvActivityReportURL, sink.server.URL)
+	t.Setenv(config.EnvCheckpointDB, filepath.Join(dir, "k.db"))
+
+	if _, err := execute(t, "run", graphPath); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// One agent node, so exactly one start and one stop — and the stop must have arrived,
+	// which is what the command's flush is there to guarantee.
+	if got := sink.count(); got != 2 {
+		t.Fatalf("the sink received %d signals, want a start and a stop", got)
+	}
+	last := sink.last()
+	if last["generating"] != false {
+		t.Errorf("the last signal is %v, want the stop", last["generating"])
+	}
+	if last["node_id"] != "greet" {
+		t.Errorf("node_id = %v, want the agent node", last["node_id"])
+	}
+}

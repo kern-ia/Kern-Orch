@@ -19,6 +19,10 @@ const (
 	// reason stated above: the URL is the whole contract, so kern-orch must not invent a
 	// sibling path on a host it knows nothing about.
 	EnvRegistryReportURL = "KERN_REGISTRY_REPORT_URL"
+	// EnvActivityReportURL points at an HTTP sink receiving one signal each time an agent
+	// node starts and stops working. Same reasoning as the two above: its own URL, because
+	// a sibling route cannot be invented for a host we know nothing about.
+	EnvActivityReportURL = "KERN_ACTIVITY_REPORT_URL"
 )
 
 // Config is the resolved runtime configuration.
@@ -30,6 +34,8 @@ type Config struct {
 	StepReportURL string
 	// RegistryReportURL is an HTTP sink for the skills catalogue; empty => no publishing.
 	RegistryReportURL string
+	// ActivityReportURL is an HTTP sink for agent activity; empty => no reporting.
+	ActivityReportURL string
 }
 
 // FromEnv builds a Config from the environment, applying defaults for unset variables.
@@ -40,6 +46,7 @@ func FromEnv() Config {
 		AgentCLI:          os.Getenv(EnvAgentCLI),
 		StepReportURL:     os.Getenv(EnvStepReportURL),
 		RegistryReportURL: os.Getenv(EnvRegistryReportURL),
+		ActivityReportURL: os.Getenv(EnvActivityReportURL),
 	}
 }
 

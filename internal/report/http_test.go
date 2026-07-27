@@ -193,3 +193,14 @@ func equalAny(got, want any) bool {
 	}
 	return true
 }
+
+// newSlowSink holds every request open until release is closed.
+func newSlowSink(t *testing.T, release <-chan struct{}) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}

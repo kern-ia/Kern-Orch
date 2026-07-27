@@ -21,7 +21,8 @@ func newRunCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := config.FromEnv()
-			runner := newRunner(cfg)
+			activity := &activityRelay{}
+			runner := newRunner(cfg, activity)
 			graphPath, err := filepath.Abs(args[0])
 			if err != nil {
 				return err
@@ -46,6 +47,16 @@ func newRunCmd() *cobra.Command {
 			name := graphName(graphPath)
 			reporter := report.NewHTTP(cfg.StepReportURL)
 			steps := &stepCounter{}
+
+			// The runner exists before the run has an id, so the hook is wired here.
+			// Flushing before returning matters: the signal that says an agent stopped is
+			// the last one a run emits, and it is exactly the one a process exiting would
+			// drop — leaving a beacon lit over a run that is long over.
+			activityReporter := report.NewActivityReporter(cfg.ActivityReportURL)
+			activity.fn = func(nodeID string, generating bool) {
+				activityReporter.Report(cmd.Context(), runID, name, nodeID, generating)
+			}
+			defer activityReporter.Flush()
 
 			err = graph.NewEngine(g).
 				OnStep(multiStep(
@@ -99,13 +110,20 @@ func newResumeCmd() *cobra.Command {
 			if graphPath == "" {
 				return fmt.Errorf("run %q has no recorded graph path; pass it explicitly: resume %s <graph.yaml>", runID, runID)
 			}
-			g, err := topology.LoadFile(graphPath, builtinRegistry(newRunner(cfg)))
+			activity := &activityRelay{}
+			g, err := topology.LoadFile(graphPath, builtinRegistry(newRunner(cfg, activity)))
 			if err != nil {
 				return err
 			}
 			name := graphName(graphPath)
 			reporter := report.NewHTTP(cfg.StepReportURL)
 			steps := &stepCounter{last: rec.Step}
+
+			activityReporter := report.NewActivityReporter(cfg.ActivityReportURL)
+			activity.fn = func(nodeID string, generating bool) {
+				activityReporter.Report(cmd.Context(), runID, name, nodeID, generating)
+			}
+			defer activityReporter.Flush()
 
 			if err := graph.NewEngine(g).
 				OnStep(multiStep(

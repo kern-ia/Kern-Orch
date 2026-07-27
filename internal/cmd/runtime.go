@@ -19,10 +19,27 @@ import (
 
 // newRunner returns the real subprocess runner when KERN_AGENT_CLI is set, otherwise the
 // deterministic stub so the harness runs with no LLM configured.
-func newRunner(cfg config.Config) graph.AgentRunner {
+// activityRelay is the seam between the runner and the reporter. The runner is built before
+// the run has an id, so the hook cannot be written at construction time; the relay is handed
+// over empty and filled once the id exists. A nil target is a no-op, which is what an
+// unconfigured sink amounts to.
+type activityRelay struct {
+	fn func(nodeID string, generating bool)
+}
+
+func (a *activityRelay) call(nodeID string, generating bool) {
+	if a.fn != nil {
+		a.fn(nodeID, generating)
+	}
+}
+
+func newRunner(cfg config.Config, activity *activityRelay) graph.AgentRunner {
 	if r, ok := agentrunner.NewSubprocessFromEnv(); ok {
 		r.Stderr = os.Stderr
 		r.TokenSink = os.Stderr
+		if activity != nil {
+			r.OnActivity = activity.call
+		}
 		return r
 	}
 	return &agentrunner.Stub{}

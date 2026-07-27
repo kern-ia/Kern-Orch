@@ -97,3 +97,20 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
 - `list-skills` code en dur `"skills"` comme défaut de `--skills-dir` au lieu de
   `config.FromEnv().SkillsDir` : `KERN_SKILLS_DIR` est donc ignoré par cette commande.
   `publish-skills` utilise la config. À aligner.
+
+## 2026-07-27 — activity-signal
+
+**A fonctionné**
+- Séparer `ActivityReporter` de `HTTPReporter` : les deux ont des exigences opposées
+  (l'un synchrone et ordonné entre niveaux, l'autre asynchrone au milieu du travail).
+  Une seule classe avec un booléen aurait caché ce désaccord.
+- `TestFlushWaitsForSignalsInFlight` compte les requêtes reçues : sans lui, un `Flush()`
+  oublié passe vert en local parce que le sink de test répond en une milliseconde.
+- Le sink lent (`newSlowSink`) prouve que `Report` ne bloque pas — une assertion qu'aucun
+  test de contenu ne peut faire.
+
+**À surveiller**
+- `newRunner` est appelé avant `newRunID()` : tout hook ayant besoin de l'identité du run
+  doit passer par un relais rempli après coup, pas par la construction du runner.
+- Le contexte du run est déjà annulé quand le dernier agent s'arrête. Tout rapport de fin
+  doit se détacher (`context.WithoutCancel`), sinon il n'est jamais envoyé.
