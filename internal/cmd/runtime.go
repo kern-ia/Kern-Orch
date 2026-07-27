@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,4 +177,15 @@ func publishRegistry(ctx context.Context, cfg config.Config, dir string) error {
 		return err
 	}
 	return pub.Publish(ctx, reg.List())
+}
+
+// failedNodes pulls the nodes a level error names. An error of any other shape names none,
+// and the caller then reports the frontier alone — which is what happened before the engine
+// carried this.
+func failedNodes(err error) []string {
+	var lvl *graph.LevelError
+	if errors.As(err, &lvl) {
+		return lvl.Nodes
+	}
+	return nil
 }

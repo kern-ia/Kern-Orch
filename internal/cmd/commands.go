@@ -66,7 +66,7 @@ func newRunCmd() *cobra.Command {
 				)).
 				Run(cmd.Context(), graph.NewState())
 			if err != nil {
-				reporter.ReportFailure(cmd.Context(), runID, name, steps.last, steps.frontier, err.Error())
+				reporter.ReportFailure(cmd.Context(), runID, name, steps.last, steps.frontier, failedNodes(err), err.Error())
 				fmt.Fprintf(cmd.OutOrStdout(), "run %s failed at last checkpoint: %v\n", runID, err)
 				fmt.Fprintf(cmd.OutOrStdout(), "resume with: kern-orch resume %s\n", runID)
 				return err
@@ -132,7 +132,7 @@ func newResumeCmd() *cobra.Command {
 					reporter.Hook(runID, name, describeTopology(graphPath)),
 				)).
 				RunFrom(cmd.Context(), rec.State, rec.Frontier); err != nil {
-				reporter.ReportFailure(cmd.Context(), runID, name, steps.last, steps.frontier, err.Error())
+				reporter.ReportFailure(cmd.Context(), runID, name, steps.last, steps.frontier, failedNodes(err), err.Error())
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "run %s resumed and completed\n", runID)

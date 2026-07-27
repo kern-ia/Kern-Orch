@@ -49,9 +49,15 @@ type TopologyEdge struct {
 	Dynamic bool     `json:"dynamic,omitempty"`
 }
 
-// Failure ends a run that did not complete, naming what went wrong.
+// Failure ends a run that did not complete, naming what went wrong and where.
+//
+// Nodes holds every node of the level that failed, sorted. A node in the reported frontier
+// that is absent from it **completed**: the engine waits for the whole level before it
+// gives up, so this is knowledge and not a guess. Without it a consumer could only mark the
+// entire frontier and hope.
 type Failure struct {
-	Message string `json:"message"`
+	Message string   `json:"message"`
+	Nodes   []string `json:"nodes,omitempty"`
 }
 
 // StepEvent is the payload accepted by the sink: one completed graph level.
@@ -167,9 +173,10 @@ func (r *HTTPReporter) Hook(runID, graphName string, topo *Topology) graph.StepF
 // The step hook cannot do this: it only ever sees levels that succeeded, and the engine
 // reports the failure by returning from Run. Without this call a failed run would look
 // exactly like a finished one to the sink.
-// frontier is the level that was about to run when things broke: without it the sink knows
-// the run failed but not where, and can only shrug at the whole graph.
-func (r *HTTPReporter) ReportFailure(ctx context.Context, runID, graphName string, step int, frontier []string, message string) {
+// frontier is the level that was running when things broke, and failed names which of those
+// nodes actually broke. The frontier alone would leave a sink able to say only "somewhere in
+// here".
+func (r *HTTPReporter) ReportFailure(ctx context.Context, runID, graphName string, step int, frontier, failed []string, message string) {
 	if !r.Enabled() {
 		return
 	}
@@ -182,7 +189,7 @@ func (r *HTTPReporter) ReportFailure(ctx context.Context, runID, graphName strin
 		Step:     step,
 		Frontier: nonNil(frontier),
 		At:       r.now(),
-		Error:    &Failure{Message: message},
+		Error:    &Failure{Message: message, Nodes: failed},
 	}); err != nil {
 		r.errf("kern-orch: report failure of run %s: %v\n", runID, err)
 	}

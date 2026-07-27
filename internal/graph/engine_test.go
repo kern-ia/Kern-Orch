@@ -2,7 +2,10 @@ package graph
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -108,5 +111,61 @@ func TestStaticRouteIsStable(t *testing.T) {
 	sort.Strings(cp)
 	if got[0] != "b" || got[1] != "a" || got[2] != "c" {
 		t.Fatalf("Static should preserve given order, got %v", got)
+	}
+}
+
+// The engine knows exactly which nodes broke: it waits for the whole level before it
+// returns. Flattening that into a string threw the knowledge away, and a consumer drawing
+// the graph could then only mark the whole frontier and hope.
+func TestALevelErrorNamesEveryNodeThatFailed(t *testing.T) {
+	failing := func(id, msg string) Node {
+		return NewToolNode(id, func(context.Context, *State) error { return errors.New(msg) })
+	}
+
+	g := NewGraph()
+	g.AddNode(appendNode("start")).
+		AddNode(appendNode("ok")).
+		AddNode(failing("boom", "exploded")).
+		AddNode(failing("crash", "also exploded"))
+	g.SetEntry("start")
+	g.AddEdge("start", Static("ok", "boom", "crash"))
+
+	err := NewEngine(g).Run(context.Background(), NewState())
+	if err == nil {
+		t.Fatal("the run was reported as a success")
+	}
+
+	var lvl *LevelError
+	if !errors.As(err, &lvl) {
+		t.Fatalf("error = %T (%v), want a *LevelError a caller can inspect", err, err)
+	}
+
+	want := []string{"boom", "crash"}
+	if !slices.Equal(lvl.Nodes, want) {
+		t.Errorf("Nodes = %v, want %v — sorted, and every failure named", lvl.Nodes, want)
+	}
+	// A node absent from the list completed. That is what lets a consumer colour the rest
+	// of the frontier instead of blaming all of it.
+	if slices.Contains(lvl.Nodes, "ok") {
+		t.Error("a node that succeeded was named among the failures")
+	}
+}
+
+// The message is the contract with humans and with every existing test: naming the node
+// reads exactly as it did before.
+func TestALevelErrorStillReadsAsBefore(t *testing.T) {
+	g := NewGraph()
+	g.AddNode(NewToolNode("boom", func(context.Context, *State) error {
+		return errors.New("exploded")
+	}))
+	g.SetEntry("boom")
+
+	err := NewEngine(g).Run(context.Background(), NewState())
+
+	if got, want := err.Error(), `node "boom": exploded`; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+	if !strings.Contains(err.Error(), "exploded") {
+		t.Error("the underlying cause was lost")
 	}
 }

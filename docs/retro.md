@@ -114,3 +114,16 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
   doit passer par un relais rempli après coup, pas par la construction du runner.
 - Le contexte du run est déjà annulé quand le dernier agent s'arrête. Tout rapport de fin
   doit se détacher (`context.WithoutCancel`), sinon il n'est jamais envoyé.
+
+## 2026-07-28 — failing-node
+
+**A fonctionné**
+- `LevelError.Error()` reproduit exactement l'ancien message : le type de l'erreur a changé
+  sans qu'aucun test existant ne bouge. Changer la structure sans changer la surface.
+- Collecter toutes les erreurs du niveau avant d'en renvoyer une : `wg.Wait()` les avait
+  déjà toutes, n'en garder qu'une était une perte gratuite.
+
+**À surveiller**
+- Troisième fois qu'une donnée existe dans kern-orch et se perd avant le contrat (`skill`,
+  puis l'id du nœud en échec). Avant d'écrire un champ, chercher s'il n'est pas déjà calculé
+  quelque part et jeté.
