@@ -110,8 +110,8 @@ func TestReporterEmitsTheV2Fixture(t *testing.T) {
 	topo := &Topology{
 		Entry: "greet",
 		Nodes: []TopologyNode{
-			{ID: "greet", Kind: "agent"},
-			{ID: "synthese", Kind: "agent"},
+			{ID: "greet", Kind: "agent", Skill: "planner"},
+			{ID: "synthese", Kind: "agent", Skill: "redacteur"},
 			{ID: "critique", Kind: "tool"},
 		},
 		Edges: []TopologyEdge{

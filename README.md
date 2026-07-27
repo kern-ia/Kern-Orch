@@ -141,7 +141,7 @@ sink needs no knowledge of kern-orch beyond the schema below. Today's consumer i
   "at": "2026-07-26T12:00:02Z",
   "topology": {
     "entry": "greet",
-    "nodes": [{ "id": "greet", "kind": "agent" }],
+    "nodes": [{ "id": "greet", "kind": "agent", "skill": "planner" }],
     "edges": [{ "from": "greet", "to": ["synthese"] }]
   }
 }
@@ -157,7 +157,8 @@ sink needs no knowledge of kern-orch beyond the schema below. Today's consumer i
 | `at` | RFC 3339 | yes | When the level completed. |
 | `topology` | object | no | The graph's shape. Sent **once**, on the run's first event. |
 | `topology.entry` | string | yes | Entry node id. Never appears in a frontier — it ran first. |
-| `topology.nodes[]` | object | yes | `id` and `kind` (`tool` / `agent` / `subgraph`). |
+| `topology.nodes[]` | object | yes | `id` and `kind` (`tool` / `agent` / `subgraph`), plus `skill` on an agent node. |
+| `topology.nodes[].skill` | string | no | The catalogue entry backing the node, as declared by `skill:` in the YAML. **Not the id** — a node `greet` may run the skill `planner`, so matching the two by name would be a guess. Absent on tool nodes, which name a Go function. |
 | `topology.edges[]` | object | no | `from`, `to[]`, or `dynamic: true` when a router picks the targets at run time. |
 | `error` | object | no | Set on the terminal event of a run that failed; `message` is required. |
 
@@ -178,16 +179,63 @@ deliberately stays inside kern-orch.
 - Granularity is the level, not the node: `Engine.OnStep` fires after a whole frontier
   completes.
 
+### Emitted — skills catalogue
+
+When `KERN_REGISTRY_REPORT_URL` is set, kern-orch POSTs its whole skills registry to that
+URL: once at the start of every `run`, and on demand via `kern-orch publish-skills`. Unset,
+it publishes nothing.
+
+It is a second variable rather than a route derived from `KERN_STEP_REPORT_URL`, for the
+reason stated above: the URL is the whole contract, so kern-orch must not invent a sibling
+path on a host it knows nothing about.
+
+#### `Catalogue` — contract `kern.registry/v1`
+
+<!-- CANONICAL BLOCK — mirrored verbatim in Kern-UI/README.md and Kern-Orch/README.md.
+     Drift is caught by tests, not by discipline: the same payload lives in
+     contracts/kern.registry.v1.json in both repos, and each side asserts against it on
+     every CI run — kern-orch that its publisher emits exactly this, kern-ui that its
+     ingestion accepts exactly this. Change the contract and both suites go red. -->
+
+```json
+{
+  "source": "kern-orch",
+  "at": "2026-07-27T12:00:00Z",
+  "skills": [
+    { "name": "Analyse", "kind": "tool", "description": "Décompose une demande." },
+    { "name": "Scribe", "kind": "agent", "description": "Rédige et reformule." }
+  ]
+}
+```
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `source` | string | yes | Which brick published this catalogue. |
+| `at` | RFC 3339 | yes | When it was read. |
+| `skills[]` | array | yes | Every skill the producer holds. May be empty. |
+| `skills[].name` | string | yes | The key. kern-orch already indexes its registry by name, so no second identifier was invented for the wire. |
+| `skills[].kind` | string | yes | `tool` or `agent` — the `type:` of the SKILL.md frontmatter. |
+| `skills[].description` | string | no | The frontmatter `description`, one line. |
+
+**What kern-orch guarantees**
+
+- **The catalogue is whole.** Each publication replaces the previous one; a skill removed
+  from disk disappears downstream on the next publication.
+- **Sorted by name**, so a sink never has to sort.
+- **Publishing never fails a run**, exactly like step reporting: a broken sink costs a line
+  on stderr and nothing else.
+
+**What deliberately does not travel.** A skill's directory — a filesystem path is an
+internal, not a contract. Its SKILL.md body. Any "wired" flag — a loaded skill is by
+definition available, so the field would read true on every row.
+
 ### Asked for, not yet emitted
 
-kern-ui needs three more things from this brick, none of which requires new data — all three
-already exist inside kern-orch and are simply never published:
+Topology, failure and the skills registry have all shipped. One thing is still asked for:
 
-| What | Where it already lives | Why kern-ui needs it |
+| What | Where it would live | Why kern-ui needs it |
 |---|---|---|
-| Run topology (nodes, edges) | `internal/topology`, `graph.Graph` | To draw a run as a graph instead of a list |
-| Per-node status, and run failure | `internal/graph` | To colour nodes, and to report a failed run at all |
-| Skills and tools registry | `internal/skills`, `internal/cmd list-skills` | Unlocks two of its views at once |
+| Tool invocation and readback | `internal/tools` | An Espace widget shows a live measurement, and nothing can be asked for one |
 
 Stated in full, with the other bricks' contracts, in
 [`../Kern-UI/docs/expected-contracts.md`](../Kern-UI/docs/expected-contracts.md).
