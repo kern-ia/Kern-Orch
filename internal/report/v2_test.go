@@ -85,7 +85,7 @@ func TestFailureIsReportedAsATerminalEvent(t *testing.T) {
 	r := NewHTTP(s.server.URL)
 	r.now = fixedNow
 
-	r.ReportFailure(context.Background(), "run-1", "review", 4, []string{"think"}, "agent think: exit status 1")
+	r.ReportFailure(context.Background(), "run-1", "review", 4, []string{"think"}, []string{"think"}, "agent think: exit status 1")
 
 	body := s.last()
 	if body == nil {
@@ -109,5 +109,5 @@ func TestFailureIsReportedAsATerminalEvent(t *testing.T) {
 }
 
 func TestFailureNeverPanicsWithoutASink(t *testing.T) {
-	NewHTTP("").ReportFailure(context.Background(), "run-1", "review", 1, nil, "boom")
+	NewHTTP("").ReportFailure(context.Background(), "run-1", "review", 1, nil, nil, "boom")
 }

@@ -134,6 +134,26 @@ func (e *Engine) RunFrom(ctx context.Context, s *State, frontier []string) error
 	return nil
 }
 
+// LevelError reports a level that did not complete, naming every node that failed.
+//
+// The engine waits for the whole level before it returns, so which nodes broke and which
+// finished is known here and nowhere else. Wrapping it in a plain string threw that away,
+// and a consumer drawing the graph could then only blame the entire frontier.
+//
+// Nodes is sorted and holds every failure. A node in the level that is absent from it
+// **completed** — that guarantee is what lets a consumer colour the rest of the frontier
+// rather than shrug at it.
+type LevelError struct {
+	Nodes []string
+	Err   error // the first failure in frontier order, wrapped
+}
+
+// Error reads exactly as the message did before this type existed.
+func (e *LevelError) Error() string { return e.Err.Error() }
+
+// Unwrap keeps errors.Is and errors.As working against the underlying cause.
+func (e *LevelError) Unwrap() error { return e.Err }
+
 // runLevel executes every node in the frontier in parallel and merges results.
 func (e *Engine) runLevel(ctx context.Context, s *State, frontier []string) ([]string, error) {
 	type outcome struct {
@@ -170,13 +190,28 @@ func (e *Engine) runLevel(ctx context.Context, s *State, frontier []string) ([]s
 	// A single-node frontier REPLACES the state with its branch, so context-replacing
 	// operations (Freeze / key deletion) and the Frozen counter propagate. A fan-out
 	// (>1 node) uses additive Merge, since each branch only contributes its own keys.
+	// Every failure is collected before any is returned: the level is over by now, so
+	// reporting one node while staying silent about another would be a choice to lose
+	// information the engine already holds.
+	var failed []string
+	var firstErr error
+	for _, o := range results {
+		if o.err != nil {
+			failed = append(failed, o.id)
+			if firstErr == nil {
+				firstErr = o.err
+			}
+		}
+	}
+	if firstErr != nil {
+		sort.Strings(failed)
+		return nil, &LevelError{Nodes: failed, Err: firstErr}
+	}
+
 	single := len(results) == 1
 	seen := make(map[string]bool)
 	var next []string
 	for _, o := range results {
-		if o.err != nil {
-			return nil, o.err
-		}
 		if single {
 			s.replaceWith(o.branch)
 		} else {

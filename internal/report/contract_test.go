@@ -139,9 +139,27 @@ func TestReporterEmitsTheV2FailureFixture(t *testing.T) {
 	r.now = func() time.Time { return time.Date(2026, 7, 26, 12, 0, 9, 0, time.UTC) }
 
 	r.ReportFailure(context.Background(), "a23ead5373d9b746", "hello", 4,
-		[]string{"synthese"}, "agent synthese: exit status 1")
+		[]string{"synthese"}, []string{"synthese"}, "agent synthese: exit status 1")
 
 	if got := s.last(); !reflect.DeepEqual(got, want) {
 		t.Errorf("the emitted failure has drifted from the published contract.\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+// A failure that names no node is still a valid failure: the field is omitted rather than
+// sent empty, so a sink can tell "we do not know which" from "none".
+func TestAFailureWithoutNamedNodesOmitsTheField(t *testing.T) {
+	s := newSink(t, http.StatusAccepted)
+	r := NewHTTP(s.server.URL)
+	r.now = fixedNow
+
+	r.ReportFailure(context.Background(), "r1", "g", 1, []string{"a"}, nil, "something broke")
+
+	failure, ok := s.last()["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("error = %#v, want an object", s.last()["error"])
+	}
+	if _, present := failure["nodes"]; present {
+		t.Errorf("nodes = %v, want the field absent when nothing is known", failure["nodes"])
 	}
 }
