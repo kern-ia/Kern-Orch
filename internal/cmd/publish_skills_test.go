@@ -92,8 +92,8 @@ func TestPublishSkillsPostsTheCatalogue(t *testing.T) {
 }
 
 // Without a sink configured the command must say so rather than silently succeed: an
-// operator running it expects the Grimoire to fill, and a no-op that looks like a success
-// is how you spend an afternoon debugging the wrong brick.
+// operator running it expects a catalogue to land somewhere, and a no-op that looks like a
+// success is how you spend an afternoon debugging the wrong brick.
 func TestPublishSkillsSaysWhenNoSinkIsConfigured(t *testing.T) {
 	t.Setenv(config.EnvRegistryReportURL, "")
 
@@ -107,7 +107,7 @@ func TestPublishSkillsSaysWhenNoSinkIsConfigured(t *testing.T) {
 	}
 }
 
-// A run publishes the catalogue too, so the Grimoire fills without a separate command.
+// A run publishes the catalogue too, so a sink is fed without a separate command.
 func TestRunPublishesTheCatalogue(t *testing.T) {
 	sink := newCatalogueSink(t)
 	dir := t.TempDir()

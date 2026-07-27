@@ -21,12 +21,16 @@ decisions:
   - "2026-07-27 : `postJSON` extrait et partagé par les deux — un timeout ou un message d'erreur ne doit pas dépendre du contrat qui voyage"
   - "2026-07-27 : `Publish` RETOURNE son erreur, contrairement au hook de step — il tourne hors du graphe, l'appelant décide ; c'est `cmd` qui garantit qu'un run ne meurt pas d'un sink cassé"
   - "2026-07-27 : `DeclaredNode.Skill` ajouté — la référence `skill:` du YAML était lue puis jetée ; sans elle un consommateur ne peut relier un run à un catalogue"
-  - "2026-07-27 : publication au démarrage de `run` ET commande `publish-skills` — sinon le Grimoire reste vide tant qu'aucun graphe n'a tourné"
+  - "2026-07-27 : publication au démarrage de `run` ET commande `publish-skills` — sinon un sink reste vide tant qu'aucun graphe n'a tourné"
 ---
 
 **Quoi** : kern-orch publie son registre de skills. Le catalogue existait depuis
 `0004-skills` mais ne sortait que sur le stdout de `list-skills` ; il traverse maintenant un
 contrat. La topologie gagne au passage le `skill` que chaque nœud agent référence.
+
+**Frontière** : kern-orch ne connaît aucun consommateur. Il poste sur une URL configurée et
+ne sait rien de ce qu'on en fait — pas de nom de vue, pas de forme de route, pas de module
+importé. Un second sink se branche sans toucher une ligne ici.
 
 **Pièges** :
 - Deux fichiers de test asserted la fixture v2 (`contract_test.go` ET `v2_test.go`) : patcher

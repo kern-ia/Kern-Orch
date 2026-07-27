@@ -71,8 +71,8 @@ func TestPublisherDoesNotLeakTheSkillDirectory(t *testing.T) {
 	}
 }
 
-// A producer with no skills must still be able to say so: an empty list is a statement,
-// and it is what tells the interface the Grimoire is empty rather than unfed.
+// A producer with no skills must still be able to say so: an empty list is a statement, and
+// it is what lets a sink tell an empty catalogue from one it never received.
 func TestPublisherSendsAnEmptyCatalogueAsAList(t *testing.T) {
 	s := newSink(t, http.StatusAccepted)
 	p := NewRegistryPublisher(s.server.URL)

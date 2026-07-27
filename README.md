@@ -235,7 +235,7 @@ Topology, failure and the skills registry have all shipped. One thing is still a
 
 | What | Where it would live | Why kern-ui needs it |
 |---|---|---|
-| Tool invocation and readback | `internal/tools` | An Espace widget shows a live measurement, and nothing can be asked for one |
+| Tool invocation and readback | `internal/tools` | A consumer can list the wired tools but cannot ask any of them for a display value |
 
 Stated in full, with the other bricks' contracts, in
 [`../Kern-UI/docs/expected-contracts.md`](../Kern-UI/docs/expected-contracts.md).
