@@ -169,6 +169,7 @@ func (c *stepCounter) count(_ context.Context, info graph.StepInfo, _ *graph.Sta
 // The caller gets the error only so it can say something useful; it must not propagate it.
 func publishRegistry(ctx context.Context, cfg config.Config, dir string) error {
 	pub := report.NewRegistryPublisher(cfg.RegistryReportURL)
+	pub.Token = cfg.SinkToken
 	if !pub.Enabled() {
 		return nil
 	}
