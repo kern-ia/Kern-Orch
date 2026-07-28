@@ -189,3 +189,20 @@ func failedNodes(err error) []string {
 	}
 	return nil
 }
+
+// nestedRuns wires every subgraph node so its nested graph reports as a run of its own,
+// pointing back at the node it belongs to.
+//
+// Each execution gets a fresh run id: the same node running twice — a retry, a loop — is
+// two nested runs, not one run reported twice. The shape is read from the file the loader
+// resolved; a graph built in Go carries no file and travels without a topology, exactly as
+// an undeclared parent would.
+func nestedRuns(reg *topology.Registry, reporter *report.HTTPReporter, parentRun string) {
+	if !reporter.Enabled() {
+		return
+	}
+	reg.OnChildStep(func(nodeID, graphRef string) graph.StepFunc {
+		return reporter.NestedHook(newRunID(), graphName(graphRef), describeTopology(graphRef),
+			&report.Parent{RunID: parentRun, NodeID: nodeID})
+	})
+}

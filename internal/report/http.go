@@ -67,6 +67,17 @@ type TopologyEdge struct {
 	Dynamic bool     `json:"dynamic,omitempty"`
 }
 
+// Parent points a nested run at the node it belongs to.
+//
+// A nested run reports as a run of its own rather than folding into its parent's stream:
+// the parent's level counter is a sequence a sink rejects out-of-order writes against, and
+// two graphs advancing at once would corrupt it. Pointing back also composes at any depth,
+// where embedding a child's topology inside its parent's would need a recursive schema.
+type Parent struct {
+	RunID  string `json:"run_id"`
+	NodeID string `json:"node_id"`
+}
+
 // Failure ends a run that did not complete, naming what went wrong and where.
 //
 // Nodes holds every node of the level that failed, sorted. A node in the reported frontier
@@ -98,6 +109,9 @@ type StepEvent struct {
 	// Error is set on the terminal event of a run that failed. Without it a failed run is
 	// indistinguishable from a finished one.
 	Error *Failure `json:"error,omitempty"`
+
+	// Parent is set on a nested run and absent on a top-level one.
+	Parent *Parent `json:"parent,omitempty"`
 }
 
 // flatten extracts the business data of a state, leaving its internals behind.
@@ -143,9 +157,11 @@ type HTTPReporter struct {
 	done  chan struct{}
 }
 
-// runReporter carries the per-run state the hook needs: the topology still to be announced.
+// runReporter carries the per-run state the hook needs: the topology still to be announced,
+// and the parent a nested run belongs to.
 type runReporter struct {
 	pending *Topology
+	parent  *Parent
 	sent    bool
 }
 
@@ -165,10 +181,16 @@ func (r *HTTPReporter) Enabled() bool { return r.URL != "" }
 // Hook returns the StepFunc to register on the engine, or nil when no sink is configured
 // so the caller can leave it out of the chain entirely.
 func (r *HTTPReporter) Hook(runID, graphName string, topo *Topology) graph.StepFunc {
+	return r.NestedHook(runID, graphName, topo, nil)
+}
+
+// NestedHook is Hook for a run that belongs to a subgraph node of another run. A nil parent
+// makes it identical to Hook.
+func (r *HTTPReporter) NestedHook(runID, graphName string, topo *Topology, parent *Parent) graph.StepFunc {
 	if !r.Enabled() {
 		return nil
 	}
-	run := &runReporter{pending: topo}
+	run := &runReporter{pending: topo, parent: parent}
 
 	return func(ctx context.Context, info graph.StepInfo, s *graph.State) error {
 		if err := ctx.Err(); err != nil {
@@ -183,6 +205,7 @@ func (r *HTTPReporter) Hook(runID, graphName string, topo *Topology) graph.StepF
 			Frontier: nonNil(info.Frontier),
 			State:    flatten(s),
 			At:       r.now(),
+			Parent:   run.parent,
 		}
 		if !run.sent {
 			ev.Topology = run.pending

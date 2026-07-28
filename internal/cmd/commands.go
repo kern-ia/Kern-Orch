@@ -27,7 +27,19 @@ func newRunCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			g, err := topology.LoadFile(graphPath, builtinRegistry(runner))
+			runID := newRunID()
+			name := graphName(graphPath)
+			reporter := report.NewHTTP(cfg.StepReportURL)
+			// Levels are delivered off the engine's thread, so the last one — and the
+			// failure that may follow it — would die with this process without a flush.
+			defer reporter.Flush()
+
+			// Wired before the graph is built, not after: a subgraph node receives its
+			// hook at construction time.
+			reg := builtinRegistry(runner)
+			nestedRuns(reg, reporter, runID)
+
+			g, err := topology.LoadFile(graphPath, reg)
 			if err != nil {
 				return err
 			}
@@ -43,12 +55,6 @@ func newRunCmd() *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "kern-orch: publish skills catalogue: %v\n", err)
 			}
 
-			runID := newRunID()
-			name := graphName(graphPath)
-			reporter := report.NewHTTP(cfg.StepReportURL)
-			// Levels are now delivered off the engine's thread, so the last one — and the
-			// failure that may follow it — would die with this process without a flush.
-			defer reporter.Flush()
 			steps := &stepCounter{}
 
 			// The runner exists before the run has an id, so the hook is wired here.
@@ -114,13 +120,17 @@ func newResumeCmd() *cobra.Command {
 				return fmt.Errorf("run %q has no recorded graph path; pass it explicitly: resume %s <graph.yaml>", runID, runID)
 			}
 			activity := &activityRelay{}
-			g, err := topology.LoadFile(graphPath, builtinRegistry(newRunner(cfg, activity)))
-			if err != nil {
-				return err
-			}
 			name := graphName(graphPath)
 			reporter := report.NewHTTP(cfg.StepReportURL)
 			defer reporter.Flush()
+
+			reg := builtinRegistry(newRunner(cfg, activity))
+			nestedRuns(reg, reporter, runID)
+
+			g, err := topology.LoadFile(graphPath, reg)
+			if err != nil {
+				return err
+			}
 			steps := &stepCounter{last: rec.Step}
 
 			activityReporter := report.NewActivityReporter(cfg.ActivityReportURL)

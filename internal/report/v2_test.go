@@ -3,7 +3,9 @@ package report
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/yoann/kern-orch/internal/graph"
 )
@@ -120,4 +122,54 @@ func TestFailureIsReportedAsATerminalEvent(t *testing.T) {
 
 func TestFailureNeverPanicsWithoutASink(t *testing.T) {
 	NewHTTP("").ReportFailure(context.Background(), "run-1", "review", 1, nil, nil, "boom")
+}
+
+const contractNested = "../../contracts/kern.step-event.v2.nested.json"
+
+// A nested run reports as a run of its own, pointing back at the node it belongs to.
+// Folding it into the parent's event stream would corrupt the parent's level counter, and
+// embedding the child's topology in the parent's would need a recursive schema for
+// something that composes perfectly well as a reference.
+func TestReporterEmitsTheNestedFixture(t *testing.T) {
+	want := fixture(t, contractNested)
+
+	s := newSink(t, http.StatusAccepted)
+	r := NewHTTP(s.server.URL)
+	r.now = func() time.Time { return time.Date(2026, 7, 28, 12, 0, 4, 0, time.UTC) }
+
+	topo := &Topology{
+		Entry: "redige",
+		Nodes: []TopologyNode{
+			{ID: "redige", Kind: "agent", Skill: "Scribe"},
+			{ID: "verifie", Kind: "tool"},
+		},
+		Edges: []TopologyEdge{{From: "redige", To: []string{"verifie"}}},
+	}
+	hook := r.NestedHook("3f9c1a7e5b204d68", "child", topo,
+		&Parent{RunID: "a23ead5373d9b746", NodeID: "nested"})
+
+	if err := hook(context.Background(),
+		graph.StepInfo{Step: 1, Frontier: []string{"verifie"}}, graph.NewState()); err != nil {
+		t.Fatalf("hook: %v", err)
+	}
+	r.Flush()
+
+	if got := s.last(); !reflect.DeepEqual(got, want) {
+		t.Errorf("the emitted payload has drifted from the published contract.\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+// A top-level run carries no parent, and the field must be absent rather than sent empty.
+func TestATopLevelRunCarriesNoParent(t *testing.T) {
+	s := newSink(t, http.StatusAccepted)
+	r := NewHTTP(s.server.URL)
+	r.now = fixedNow
+
+	_ = r.Hook("r1", "g", nil)(context.Background(),
+		graph.StepInfo{Step: 1, Frontier: []string{"a"}}, graph.NewState())
+	r.Flush()
+
+	if _, present := s.last()["parent"]; present {
+		t.Error("a top-level run announced a parent")
+	}
 }
