@@ -154,3 +154,23 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
 **À surveiller**
 - Tout ce qui se branche via la `Registry` doit être posé AVANT `LoadFile` : les nœuds
   reçoivent leurs options à la construction, pas à l'exécution.
+
+## 2026-07-28 — mode démon
+
+**A fonctionné**
+- Poser l'interface `Runner` côté transport (`internal/daemon`) AVANT l'implémentation
+  côté orchestration (`internal/cmd`) : le paquet HTTP s'est écrit et testé avec un faux,
+  sans jamais toucher un graphe réel. Aucune dépendance croisée à démêler ensuite.
+- Refuser de synchrone sur un graphe invalide plutôt que de le découvrir dans une
+  goroutine invisible : le test `TestDaemonRunnerFailsFastOnABadGraph` a forcé cette
+  décision avant l'implémentation.
+- Le marqueur `queued` à l'étape -1 : choisi pour être inférieur à toute étape réelle
+  (qui démarre à 0 et ne fait que croître), donc jamais de collision de clé à réfléchir.
+
+**À surveiller**
+- Cette daemon mode est le PRÉREQUIS de C5 (exposition des tools), pas C5 elle-même. Ne
+  pas confondre « kern-orch peut tourner en continu » avec « kern-ui peut lire un outil » —
+  ce sont deux contrats différents, le second reste à écrire.
+- Un run lancé par le démon persiste après l'arrêt du process (checkpoint SQLite), mais rien
+  ne le relance automatiquement au redémarrage. `resume` reste manuel — pas encore de
+  reprise automatique des runs `running` trouvés au démarrage de `serve`.
