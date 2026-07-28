@@ -46,6 +46,9 @@ func newRunCmd() *cobra.Command {
 			runID := newRunID()
 			name := graphName(graphPath)
 			reporter := report.NewHTTP(cfg.StepReportURL)
+			// Levels are now delivered off the engine's thread, so the last one — and the
+			// failure that may follow it — would die with this process without a flush.
+			defer reporter.Flush()
 			steps := &stepCounter{}
 
 			// The runner exists before the run has an id, so the hook is wired here.
@@ -117,6 +120,7 @@ func newResumeCmd() *cobra.Command {
 			}
 			name := graphName(graphPath)
 			reporter := report.NewHTTP(cfg.StepReportURL)
+			defer reporter.Flush()
 			steps := &stepCounter{last: rec.Step}
 
 			activityReporter := report.NewActivityReporter(cfg.ActivityReportURL)

@@ -174,9 +174,19 @@ deliberately stays inside kern-orch.
 
 **What kern-orch guarantees**
 
-- **Reporting never fails a run.** Whatever the sink answers — 500, timeout, unreachable
-  host, malformed URL — the graph keeps going and the error goes to stderr.
-- **One POST per level, in order**, synchronous, capped at 2 s each.
+- **Reporting never fails a run, nor slows it.** Whatever the sink answers — 500, timeout,
+  unreachable host, malformed URL — the graph keeps going at full speed and the error goes
+  to stderr. Levels are queued and delivered by a single worker off the engine's thread.
+- **One POST per level, in order.** Order is a guarantee: a sink folds levels in sequence
+  and rejects one older than the level it holds, so delivery uses one queue rather than a
+  goroutine per event. A failure goes through the same queue and can never overtake the
+  levels that led to it.
+- **A sink too slow to keep up loses levels rather than blocking the run.** The queue holds
+  64; past that, events are dropped and announced on stderr. Every event carries the full
+  merged state, so the next one supersedes what was lost.
+- **Exiting is bounded too.** The command waits up to 3 s for the queue to drain, then gives
+  up loudly. Moving delivery off the engine's thread would only relocate the wait if the
+  process then hung on exit.
 - Granularity is the level, not the node: `Engine.OnStep` fires after a whole frontier
   completes.
 

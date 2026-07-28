@@ -30,12 +30,16 @@ func TestTopologyIsSentOnceAtTheStartOfTheRun(t *testing.T) {
 		}
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.bodies[0]["topology"]; !ok {
+	r.Flush()
+
+	bodies := s.all()
+	if len(bodies) != 3 {
+		t.Fatalf("the sink received %d events, want 3", len(bodies))
+	}
+	if _, ok := bodies[0]["topology"]; !ok {
 		t.Error("the first event carries no topology")
 	}
-	for i, body := range s.bodies[1:] {
+	for i, body := range bodies[1:] {
 		if _, ok := body["topology"]; ok {
 			t.Errorf("event %d repeats the topology", i+2)
 		}
@@ -49,6 +53,8 @@ func TestTopologyCarriesNodesAndEdges(t *testing.T) {
 
 	_ = r.Hook("run-1", "review", topo())(context.Background(),
 		graph.StepInfo{Step: 1, Frontier: []string{"done"}}, graph.NewState())
+
+	r.Flush()
 
 	sent, ok := s.last()["topology"].(map[string]any)
 	if !ok {
@@ -73,6 +79,8 @@ func TestRunsWithoutATopologySendNone(t *testing.T) {
 	_ = r.Hook("run-1", "review", nil)(context.Background(),
 		graph.StepInfo{Step: 1, Frontier: []string{"a"}}, graph.NewState())
 
+	r.Flush()
+
 	if _, ok := s.last()["topology"]; ok {
 		t.Error("a topology appeared out of nowhere")
 	}
@@ -86,6 +94,8 @@ func TestFailureIsReportedAsATerminalEvent(t *testing.T) {
 	r.now = fixedNow
 
 	r.ReportFailure(context.Background(), "run-1", "review", 4, []string{"think"}, []string{"think"}, "agent think: exit status 1")
+
+	r.Flush()
 
 	body := s.last()
 	if body == nil {

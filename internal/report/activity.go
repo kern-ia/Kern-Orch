@@ -33,6 +33,9 @@ type ActivityReporter struct {
 	URL     string
 	Timeout time.Duration
 
+	// FlushTimeout caps how long Flush waits. Defaults to DefaultFlushTimeout.
+	FlushTimeout time.Duration
+
 	// Errf receives delivery failures. Defaults to stderr.
 	Errf func(format string, args ...any)
 
@@ -82,7 +85,29 @@ func (r *ActivityReporter) Report(ctx context.Context, runID, graphName, nodeID 
 
 // Flush waits for every signal already handed to Report to finish its round trip. A
 // command must call it before exiting.
-func (r *ActivityReporter) Flush() { r.wg.Wait() }
+//
+// Bounded, for the same reason the queue exists: a sink that never answers must not hold up
+// the exit any more than it holds up the run.
+func (r *ActivityReporter) Flush() {
+	done := make(chan struct{})
+	go func() {
+		r.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(r.flushTimeout()):
+		r.errf("kern-orch: gave up waiting for the activity sink after %s\n", r.flushTimeout())
+	}
+}
+
+func (r *ActivityReporter) flushTimeout() time.Duration {
+	if r.FlushTimeout > 0 {
+		return r.FlushTimeout
+	}
+	return DefaultFlushTimeout
+}
 
 func (r *ActivityReporter) timeout() time.Duration {
 	if r.Timeout > 0 {
