@@ -124,9 +124,14 @@ Rôle : catalogue des capacités (SKILL.md, `type: tool|agent`).
 ### 🟡 EPIC-03 · kern-tools — bibliothèque de tools — *partiel (sous-package de kern-orch)*
 Rôle : bibliothèque de tools invoqués par un agent, consommés aussi par l'UI/MCP/API.
 - [x] `topology.Registry` (funcs tool/router par nom) + builtins de démo
+- [x] Mode démon (`kern-orch serve`) — un service qui tourne, plutôt qu'une commande qu'on
+      lance. Prérequis de l'exposition, pas l'exposition elle-même : les runs se pilotent
+      par HTTP (`POST /api/v1/runs`, statut immédiat, reprise), mais aucun tool n'est encore
+      lisible ni invocable depuis l'extérieur. *(2026-07-28)*
 - [ ] Format de tool réutilisable (schéma d'entrée/sortie, validation) **M**
 - [ ] Chargement de tools depuis les skills (`type: tool`) **M**
-- [ ] Exposition MCP/API des tools (un service unique, zéro duplication) **L**
+- [ ] Exposition MCP/API des tools (un service unique, zéro duplication) **L** — reste à
+      faire ; c'est elle qui débloquerait C5 côté kern-ui.
 - Dépendances : EPIC-02.
 
 ### ⬜ EPIC-04 · kern-exec — exécution terminal / sandbox

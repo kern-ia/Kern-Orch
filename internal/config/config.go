@@ -27,6 +27,14 @@ const (
 	// URLs: they are three contracts to the same consumer, and asking an operator to manage
 	// three secrets would mostly produce three copies of one.
 	EnvSinkToken = "KERN_SINK_TOKEN"
+
+	// EnvServeAddr is where `kern-orch serve` listens.
+	EnvServeAddr = "KERN_ORCH_ADDR"
+	// EnvServeToken is the bearer credential a caller of the daemon API must present.
+	// Empty leaves the daemon open, which `serve` refuses on a public address — the same
+	// rule kern-ui enforces on its own API, re-derived here rather than shared: the two
+	// bricks depend on nothing of each other's.
+	EnvServeToken = "KERN_ORCH_TOKEN"
 )
 
 // Config is the resolved runtime configuration.
@@ -42,6 +50,11 @@ type Config struct {
 	ActivityReportURL string
 	// SinkToken is presented to the sinks above; empty => reports travel anonymous.
 	SinkToken string
+
+	// ServeAddr is where `serve` listens.
+	ServeAddr string
+	// ServeToken is the credential the daemon API requires; empty => open (local dev only).
+	ServeToken string
 }
 
 // FromEnv builds a Config from the environment, applying defaults for unset variables.
@@ -54,6 +67,8 @@ func FromEnv() Config {
 		RegistryReportURL: os.Getenv(EnvRegistryReportURL),
 		ActivityReportURL: os.Getenv(EnvActivityReportURL),
 		SinkToken:         os.Getenv(EnvSinkToken),
+		ServeAddr:         envOr(EnvServeAddr, "127.0.0.1:7070"),
+		ServeToken:        os.Getenv(EnvServeToken),
 	}
 }
 
