@@ -127,3 +127,19 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
 - Troisième fois qu'une donnée existe dans kern-orch et se perd avant le contrat (`skill`,
   puis l'id du nœud en échec). Avant d'écrire un champ, chercher s'il n'est pas déjà calculé
   quelque part et jeté.
+
+## 2026-07-28 — async-step-reporter
+
+**A fonctionné**
+- Mesurer avant/après avec un vrai puits lent plutôt que de déduire le gain. C'est la mesure
+  qui a révélé que le premier jet déplaçait l'attente du moteur vers la sortie du processus
+  au lieu de la supprimer.
+- Écrire le test d'ORDRE avant le code : c'est lui qui a imposé une file à un consommateur
+  unique plutôt qu'une goroutine par événement, qui aurait perdu des frontières en silence.
+
+**À surveiller**
+- Ordre requis ou non : l'activité tolère le désordre (garde par horodatage), les steps non
+  (repliés en séquence). Deux contrats, deux modèles de livraison — ne pas copier l'un sur
+  l'autre sans se poser la question.
+- Rendre asynchrone une livraison invalide tout test qui affirmait juste après l'appel. Neuf
+  ici. C'est le signe que le changement est réel, pas une gêne.

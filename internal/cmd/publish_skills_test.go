@@ -188,3 +188,51 @@ func TestRunBracketsAgentActivity(t *testing.T) {
 		t.Errorf("node_id = %v, want the agent node", last["node_id"])
 	}
 }
+
+// Delivery moved off the engine's thread, so the guarantee that matters is no longer
+// "it was posted" but "the command waited for it before exiting".
+func TestRunDeliversEveryLevelDespiteAsyncReporting(t *testing.T) {
+	sink := newCatalogueSink(t)
+	dir := t.TempDir()
+	graphPath := filepath.Join(dir, "g.yaml")
+	if err := os.WriteFile(graphPath, []byte(exampleGraph), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(config.EnvStepReportURL, sink.server.URL)
+	t.Setenv(config.EnvCheckpointDB, filepath.Join(dir, "k.db"))
+
+	if _, err := execute(t, "run", graphPath); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	// greet then finish, then the empty frontier that closes the run.
+	if got := sink.count(); got < 2 {
+		t.Fatalf("the sink received %d levels, want the whole run — the flush came too early", got)
+	}
+	if last := sink.last(); last["frontier"] == nil {
+		t.Errorf("the last event carries no frontier: %v", last)
+	} else if fr, _ := last["frontier"].([]any); len(fr) != 0 {
+		t.Errorf("the last frontier is %v, want the empty one that closes the run", fr)
+	}
+}
+
+// A sink nobody can reach must cost the run nothing at all, now that nothing waits on it.
+func TestRunIsNotSlowedByAnUnreachableSink(t *testing.T) {
+	dir := t.TempDir()
+	graphPath := filepath.Join(dir, "g.yaml")
+	if err := os.WriteFile(graphPath, []byte(exampleGraph), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(config.EnvStepReportURL, "http://127.0.0.1:1/steps")
+	t.Setenv(config.EnvCheckpointDB, filepath.Join(dir, "k.db"))
+
+	out, err := execute(t, "run", graphPath)
+	if err != nil {
+		t.Fatalf("an unreachable sink aborted the run: %v (%s)", err, out)
+	}
+	if !strings.Contains(out, "completed") {
+		t.Errorf("output = %q, want the run to have completed", out)
+	}
+}

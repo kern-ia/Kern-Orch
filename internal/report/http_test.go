@@ -73,6 +73,8 @@ func TestHookPostsTheStepEvent(t *testing.T) {
 		t.Fatalf("hook: %v", err)
 	}
 
+	r.Flush()
+
 	body := s.last()
 	if body == nil {
 		t.Fatal("the sink received nothing")
@@ -106,6 +108,8 @@ func TestHookReportsAnEmptyFrontierSoTheSinkCanCloseTheRun(t *testing.T) {
 		t.Fatalf("hook: %v", err)
 	}
 
+	r.Flush()
+
 	frontier, ok := s.last()["frontier"].([]any)
 	if !ok || len(frontier) != 0 {
 		t.Errorf("frontier = %v, want an empty list", s.last()["frontier"])
@@ -121,6 +125,8 @@ func TestHookCarriesTheState(t *testing.T) {
 	state.Set("topic", "confinement")
 
 	_ = r.Hook("run-42", "review", nil)(context.Background(), graph.StepInfo{Step: 1, Frontier: []string{"a"}}, state)
+
+	r.Flush()
 
 	got, ok := s.last()["state"].(map[string]any)
 	if !ok || got["topic"] != "confinement" {
@@ -172,6 +178,8 @@ func TestHookStopsPostingOnceTheRunContextIsCancelled(t *testing.T) {
 	if err := r.Hook("run-42", "review", nil)(ctx, graph.StepInfo{Step: 1}, graph.NewState()); err != nil {
 		t.Errorf("hook: %v, want nil", err)
 	}
+	r.Flush()
+
 	if s.count() != 0 {
 		t.Errorf("the sink received %d requests, want 0 on a cancelled context", s.count())
 	}
@@ -203,4 +211,11 @@ func newSlowSink(t *testing.T, release <-chan struct{}) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// all returns every body the sink received, in arrival order.
+func (s *sink) all() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]map[string]any(nil), s.bodies...)
 }

@@ -2,8 +2,8 @@
 //
 // It is observability, never a dependency of the run: the hook it produces reports errors
 // to stderr and always returns nil, so a sink that is slow, broken or absent can never
-// abort a graph. The direction of dependency matches the rest of the infra — report
-// depends on graph, never the reverse.
+// abort a graph — nor, since the queue below, even slow it down. The direction of
+// dependency matches the rest of the infra: report depends on graph, never the reverse.
 package report
 
 import (
@@ -13,13 +13,31 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/yoann/kern-orch/internal/graph"
 )
 
-// DefaultTimeout caps how long a single report may hold up a run.
+// DefaultTimeout caps how long a single report may take. It no longer holds up a run: see
+// stepQueueSize.
 const DefaultTimeout = 2 * time.Second
+
+// stepQueueSize is how many levels may be waiting for delivery before the reporter starts
+// dropping them.
+//
+// Dropping is the right failure here, and blocking is not. Every event carries the full
+// merged state, so a sink that misses one level is corrected by the next; a graph that
+// waits on a broken sink is a graph running slower because someone is watching it. This is
+// the same trade the interface already makes for browsers that fall behind.
+const stepQueueSize = 64
+
+// DefaultFlushTimeout caps how long Flush waits for the queue to drain.
+//
+// Moving delivery off the engine's thread would only relocate the problem if the command
+// then hung on exit instead: a sink that never answers must cost the run nothing, including
+// nothing at the end of it. What is still queued when this expires is announced and dropped.
+const DefaultFlushTimeout = 3 * time.Second
 
 // Topology is the shape of the graph, sent once at the start of a run.
 //
@@ -108,10 +126,21 @@ type HTTPReporter struct {
 	Timeout time.Duration
 	Client  *http.Client
 
+	// FlushTimeout caps how long Flush waits. Defaults to DefaultFlushTimeout.
+	FlushTimeout time.Duration
+
 	// Errf receives delivery failures. Defaults to stderr.
 	Errf func(format string, args ...any)
 
 	now func() time.Time
+
+	// One queue and one worker, started on first use. A goroutine per event would be
+	// simpler and wrong: a sink folds levels in sequence and rejects one older than the
+	// level it already holds, so two reports racing would silently lose a frontier.
+	start sync.Once
+	stop  sync.Once
+	queue chan StepEvent
+	done  chan struct{}
 }
 
 // runReporter carries the per-run state the hook needs: the topology still to be announced.
@@ -160,10 +189,8 @@ func (r *HTTPReporter) Hook(runID, graphName string, topo *Topology) graph.StepF
 			run.sent = true
 		}
 
-		if err := r.send(ctx, ev); err != nil {
-			r.errf("kern-orch: report step %d of run %s: %v\n", info.Step, runID, err)
-		}
-		// Always nil: see the package comment.
+		r.enqueue(ev)
+		// Always nil, and now also immediate: see the package comment.
 		return nil
 	}
 }
@@ -183,16 +210,74 @@ func (r *HTTPReporter) ReportFailure(ctx context.Context, runID, graphName strin
 
 	// The run context is usually already cancelled by the time we get here, so the report
 	// gets a context of its own — otherwise no failure would ever be reported.
-	if err := r.send(context.WithoutCancel(ctx), StepEvent{
+	// Through the same queue as the levels, so it cannot overtake them: a sink folding a
+	// failure before the steps that led to it would show a failed run coming back to life.
+	r.enqueue(StepEvent{
 		RunID:    runID,
 		Graph:    graphName,
 		Step:     step,
 		Frontier: nonNil(frontier),
 		At:       r.now(),
 		Error:    &Failure{Message: message, Nodes: failed},
-	}); err != nil {
-		r.errf("kern-orch: report failure of run %s: %v\n", runID, err)
+	})
+}
+
+// enqueue hands an event to the worker, starting it on first use. A full queue drops rather
+// than waits — see stepQueueSize.
+func (r *HTTPReporter) enqueue(ev StepEvent) {
+	if !r.Enabled() {
+		return
 	}
+	r.start.Do(r.startWorker)
+
+	select {
+	case r.queue <- ev:
+	default:
+		r.errf("kern-orch: report queue full, dropping step %d of run %s\n", ev.Step, ev.RunID)
+	}
+}
+
+func (r *HTTPReporter) startWorker() {
+	r.queue = make(chan StepEvent, stepQueueSize)
+	r.done = make(chan struct{})
+
+	go func() {
+		defer close(r.done)
+		for ev := range r.queue {
+			// A detached context: the run is usually already finishing, and delivery must
+			// not be cancelled along with it.
+			if err := r.send(context.WithoutCancel(context.Background()), ev); err != nil {
+				r.errf("kern-orch: report step %d of run %s: %v\n", ev.Step, ev.RunID, err)
+			}
+		}
+	}()
+}
+
+// Flush delivers everything still queued and stops the worker. A command must call it
+// before exiting, or the last level of a run dies with the process.
+//
+// It is safe to call on a reporter that was never used, and safe to call twice.
+func (r *HTTPReporter) Flush() {
+	if r.queue == nil {
+		return
+	}
+	r.stop.Do(func() {
+		close(r.queue)
+		select {
+		case <-r.done:
+		case <-time.After(r.flushTimeout()):
+			// The worker is left to finish or not; this is a command on its way out, and
+			// an undelivered level is worth a line on stderr, never a hang.
+			r.errf("kern-orch: gave up waiting for the report sink after %s\n", r.flushTimeout())
+		}
+	})
+}
+
+func (r *HTTPReporter) flushTimeout() time.Duration {
+	if r.FlushTimeout > 0 {
+		return r.FlushTimeout
+	}
+	return DefaultFlushTimeout
 }
 
 func nonNil(frontier []string) []string {

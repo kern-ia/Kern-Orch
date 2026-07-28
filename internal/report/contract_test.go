@@ -48,6 +48,8 @@ func TestReporterEmitsTheContractFixture(t *testing.T) {
 		t.Fatalf("hook: %v", err)
 	}
 
+	r.Flush()
+
 	got := s.last()
 	if got == nil {
 		t.Fatal("the reporter posted nothing")
@@ -69,6 +71,8 @@ func TestContractFieldNames(t *testing.T) {
 	state.Set("echo", "...")
 	_ = r.Hook("run", "g", nil)(context.Background(),
 		graph.StepInfo{Step: 1, Frontier: []string{"a"}}, state)
+
+	r.Flush()
 
 	for _, key := range []string{"run_id", "graph", "step", "frontier", "state", "at"} {
 		if _, ok := s.last()[key]; !ok {
@@ -126,6 +130,8 @@ func TestReporterEmitsTheV2Fixture(t *testing.T) {
 		t.Fatalf("hook: %v", err)
 	}
 
+	r.Flush()
+
 	if got := s.last(); !reflect.DeepEqual(got, want) {
 		t.Errorf("the emitted payload has drifted from the published contract.\n got: %#v\nwant: %#v", got, want)
 	}
@@ -141,6 +147,8 @@ func TestReporterEmitsTheV2FailureFixture(t *testing.T) {
 	r.ReportFailure(context.Background(), "a23ead5373d9b746", "hello", 4,
 		[]string{"synthese"}, []string{"synthese"}, "agent synthese: exit status 1")
 
+	r.Flush()
+
 	if got := s.last(); !reflect.DeepEqual(got, want) {
 		t.Errorf("the emitted failure has drifted from the published contract.\n got: %#v\nwant: %#v", got, want)
 	}
@@ -154,6 +162,8 @@ func TestAFailureWithoutNamedNodesOmitsTheField(t *testing.T) {
 	r.now = fixedNow
 
 	r.ReportFailure(context.Background(), "r1", "g", 1, []string{"a"}, nil, "something broke")
+
+	r.Flush()
 
 	failure, ok := s.last()["error"].(map[string]any)
 	if !ok {
