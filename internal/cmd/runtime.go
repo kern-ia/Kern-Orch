@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,15 +13,34 @@ import (
 	"github.com/yoann/kern-orch/internal/checkpoint"
 	"github.com/yoann/kern-orch/internal/config"
 	"github.com/yoann/kern-orch/internal/graph"
+	"github.com/yoann/kern-orch/internal/report"
+	"github.com/yoann/kern-orch/internal/skills"
 	"github.com/yoann/kern-orch/internal/topology"
 )
 
 // newRunner returns the real subprocess runner when KERN_AGENT_CLI is set, otherwise the
 // deterministic stub so the harness runs with no LLM configured.
-func newRunner(cfg config.Config) graph.AgentRunner {
+// activityRelay is the seam between the runner and the reporter. The runner is built before
+// the run has an id, so the hook cannot be written at construction time; the relay is handed
+// over empty and filled once the id exists. A nil target is a no-op, which is what an
+// unconfigured sink amounts to.
+type activityRelay struct {
+	fn func(nodeID string, generating bool)
+}
+
+func (a *activityRelay) call(nodeID string, generating bool) {
+	if a.fn != nil {
+		a.fn(nodeID, generating)
+	}
+}
+
+func newRunner(cfg config.Config, activity *activityRelay) graph.AgentRunner {
 	if r, ok := agentrunner.NewSubprocessFromEnv(); ok {
 		r.Stderr = os.Stderr
 		r.TokenSink = os.Stderr
+		if activity != nil {
+			r.OnActivity = activity.call
+		}
 		return r
 	}
 	return &agentrunner.Stub{}
@@ -103,9 +123,86 @@ func graphName(graphPath string) string {
 	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
+// describeTopology reads the graph's declared shape for the reporter. A failure here is
+// never fatal: the run matters, drawing it does not.
+func describeTopology(graphPath string) *report.Topology {
+	d, err := topology.DescribeFile(graphPath)
+	if err != nil {
+		return nil
+	}
+
+	topo := &report.Topology{Entry: d.Entry}
+	for _, n := range d.Nodes {
+		topo.Nodes = append(topo.Nodes, report.TopologyNode{ID: n.ID, Kind: n.Kind, Skill: n.Skill})
+	}
+	for _, e := range d.Edges {
+		topo.Edges = append(topo.Edges, report.TopologyEdge{From: e.From, To: e.To, Dynamic: e.Dynamic})
+	}
+	return topo
+}
+
 // newRunID returns a short random run identifier.
 func newRunID() string {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	return hex.EncodeToString(b[:])
+}
+
+// stepCounter remembers where the run had got to, so a failure can be reported against it.
+// The engine returns its error from Run, long after the last hook fired — by then the level
+// and the frontier are gone unless something kept them.
+type stepCounter struct {
+	last     int
+	frontier []string
+}
+
+func (c *stepCounter) count(_ context.Context, info graph.StepInfo, _ *graph.State) error {
+	c.last = info.Step
+	c.frontier = info.Frontier
+	return nil
+}
+
+// publishRegistry pushes the skills catalogue to the configured sink.
+//
+// Best-effort by design, exactly like the step reporter: publishing is observability, and
+// a sink that is slow, broken or absent must never be able to stop a graph from running.
+// The caller gets the error only so it can say something useful; it must not propagate it.
+func publishRegistry(ctx context.Context, cfg config.Config, dir string) error {
+	pub := report.NewRegistryPublisher(cfg.RegistryReportURL)
+	if !pub.Enabled() {
+		return nil
+	}
+	reg, err := skills.Load(dir)
+	if err != nil {
+		return err
+	}
+	return pub.Publish(ctx, reg.List())
+}
+
+// failedNodes pulls the nodes a level error names. An error of any other shape names none,
+// and the caller then reports the frontier alone — which is what happened before the engine
+// carried this.
+func failedNodes(err error) []string {
+	var lvl *graph.LevelError
+	if errors.As(err, &lvl) {
+		return lvl.Nodes
+	}
+	return nil
+}
+
+// nestedRuns wires every subgraph node so its nested graph reports as a run of its own,
+// pointing back at the node it belongs to.
+//
+// Each execution gets a fresh run id: the same node running twice — a retry, a loop — is
+// two nested runs, not one run reported twice. The shape is read from the file the loader
+// resolved; a graph built in Go carries no file and travels without a topology, exactly as
+// an undeclared parent would.
+func nestedRuns(reg *topology.Registry, reporter *report.HTTPReporter, parentRun string) {
+	if !reporter.Enabled() {
+		return
+	}
+	reg.OnChildStep(func(nodeID, graphRef string) graph.StepFunc {
+		return reporter.NestedHook(newRunID(), graphName(graphRef), describeTopology(graphRef),
+			&report.Parent{RunID: parentRun, NodeID: nodeID})
+	})
 }

@@ -23,6 +23,18 @@ type Subprocess struct {
 	Env       []string  // child environment (nil => inherit parent)
 	Stderr    io.Writer // child stderr (nil => discarded)
 	TokenSink io.Writer // incremental token stream (nil => discarded)
+
+	// OnActivity, when set, is called with true once the child is running and with false
+	// when it is done, whatever the outcome. It brackets the window during which a model
+	// is working on this node.
+	//
+	// The bracket opens at spawn rather than at the first token on purpose: a provider that
+	// answers in one piece streams no token at all, and waiting for one would report such a
+	// node as never having thought. What a caller learns is "the model is working", which
+	// is the coarse fact this hook exists to carry.
+	//
+	// It must not block: it is called on the run's own thread.
+	OnActivity func(nodeID string, generating bool)
 }
 
 // NewSubprocessFromEnv builds a runner from KERN_AGENT_CLI. The bool is false when the
@@ -60,6 +72,11 @@ func (r *Subprocess) Run(ctx context.Context, req graph.AgentRequest) (graph.Age
 	if err := cmd.Start(); err != nil {
 		return graph.AgentResult{}, fmt.Errorf("agentrunner: start %q: %w", r.Path, err)
 	}
+
+	// Deferred so the bracket closes on every path out of here, including the error ones.
+	// A stop that only fired on success would leave a beacon lit on a broken run.
+	r.activity(req.NodeID, true)
+	defer r.activity(req.NodeID, false)
 
 	// Send the single request object, then close stdin so the child knows we're done.
 	if _, err := stdin.Write(payload); err != nil {
@@ -111,4 +128,11 @@ func (r *Subprocess) consume(stdout io.Reader) (graph.AgentResult, error) {
 		return graph.AgentResult{}, fmt.Errorf("agentrunner: child produced no result event")
 	}
 	return *result, nil
+}
+
+// activity fires the OnActivity hook when one is set.
+func (r *Subprocess) activity(nodeID string, generating bool) {
+	if r.OnActivity != nil {
+		r.OnActivity(nodeID, generating)
+	}
 }

@@ -123,12 +123,12 @@ The URL is the whole contract: kern-orch knows nothing of the sink's route shape
 sink needs no knowledge of kern-orch beyond the schema below. Today's consumer is
 [`kern-ui`](../Kern-UI/README.md).
 
-#### `StepEvent` — contract `kern.step-event/v1`
+#### `StepEvent` — contract `kern.step-event/v2`
 
 <!-- CANONICAL BLOCK — mirrored verbatim in Kern-UI/README.md and Kern-Orch/README.md.
-     Drift is caught by tests, not by discipline: the same payload lives in
-     contracts/kern.step-event.v1.json in both repos, and each side asserts against it
-     on every CI run — kern-orch that its reporter emits exactly this, kern-ui that its
+     Drift is caught by tests, not by discipline: the same payloads live in
+     contracts/kern.step-event.v2*.json in both repos, and each side asserts against them on
+     every CI run — kern-orch that its reporter emits exactly this, kern-ui that its
      ingestion accepts exactly this. Change the contract and both suites go red. -->
 
 ```json
@@ -138,7 +138,12 @@ sink needs no knowledge of kern-orch beyond the schema below. Today's consumer i
   "step": 2,
   "frontier": ["synthese", "critique"],
   "state": { "echo": "..." },
-  "at": "2026-07-26T12:00:02Z"
+  "at": "2026-07-26T12:00:02Z",
+  "topology": {
+    "entry": "greet",
+    "nodes": [{ "id": "greet", "kind": "agent", "skill": "planner" }],
+    "edges": [{ "from": "greet", "to": ["synthese"] }]
+  }
 }
 ```
 
@@ -150,6 +155,14 @@ sink needs no knowledge of kern-orch beyond the schema below. Today's consumer i
 | `frontier` | string[] | yes | The nodes to execute **next**. An empty list means the run is over. |
 | `state` | object | no | Flat business data. Never a producer's internal envelope. |
 | `at` | RFC 3339 | yes | When the level completed. |
+| `topology` | object | no | The graph's shape. Sent **once**, on the run's first event. |
+| `topology.entry` | string | yes | Entry node id. Never appears in a frontier — it ran first. |
+| `topology.nodes[]` | object | yes | `id` and `kind` (`tool` / `agent` / `subgraph`), plus `skill` on an agent node. |
+| `topology.nodes[].skill` | string | no | The catalogue entry backing the node, as declared by `skill:` in the YAML. **Not the id** — a node `greet` may run the skill `planner`, so matching the two by name would be a guess. Absent on tool nodes, which name a Go function. |
+| `topology.edges[]` | object | no | `from`, `to[]`, or `dynamic: true` when a router picks the targets at run time. |
+| `error` | object | no | Set on the terminal event of a run that failed; `message` is required. |
+| `parent` | object | no | Set on a **nested run** — the graph a subgraph node ran. `run_id` is the parent run, `node_id` the node it belongs to. Absent on a top-level run. |
+| `error.nodes[]` | string[] | no | The nodes of `frontier` that actually broke. A node in `frontier` and **absent here completed** — the producer waits for the whole level before giving up. Omitted when the producer cannot say, and a consumer then falls back to marking the whole frontier. |
 
 kern-orch fills `graph` with the topology file name minus its extension, and `state`
 through `State.Keys()`/`Get()` — the wire form of `graph.State` (zones, freeze counter)
@@ -162,11 +175,130 @@ deliberately stays inside kern-orch.
 
 **What kern-orch guarantees**
 
-- **Reporting never fails a run.** Whatever the sink answers — 500, timeout, unreachable
-  host, malformed URL — the graph keeps going and the error goes to stderr.
-- **One POST per level, in order**, synchronous, capped at 2 s each.
+- **Reporting never fails a run, nor slows it.** Whatever the sink answers — 500, timeout,
+  unreachable host, malformed URL — the graph keeps going at full speed and the error goes
+  to stderr. Levels are queued and delivered by a single worker off the engine's thread.
+- **One POST per level, in order.** Order is a guarantee: a sink folds levels in sequence
+  and rejects one older than the level it holds, so delivery uses one queue rather than a
+  goroutine per event. A failure goes through the same queue and can never overtake the
+  levels that led to it.
+- **A sink too slow to keep up loses levels rather than blocking the run.** The queue holds
+  64; past that, events are dropped and announced on stderr. Every event carries the full
+  merged state, so the next one supersedes what was lost.
+- **Exiting is bounded too.** The command waits up to 3 s for the queue to drain, then gives
+  up loudly. Moving delivery off the engine's thread would only relocate the wait if the
+  process then hung on exit.
 - Granularity is the level, not the node: `Engine.OnStep` fires after a whole frontier
   completes.
+
+### Emitted — agent activity
+
+When `KERN_ACTIVITY_REPORT_URL` is set, kern-orch reports each time an agent node starts and
+stops working. Unset, it reports nothing.
+
+Unlike the step reporter this one posts **off the run's thread**. A step is reported between
+levels, where a pause costs little; activity is reported at the exact moment an agent is
+about to start, and making it wait on an HTTP round trip would let observability slow down
+the thing it observes. The command flushes before exiting, because the signal that says an
+agent *stopped* is the last one a run emits and precisely the one a process exiting would
+drop.
+
+#### `ActivityEvent` — contract `kern.activity/v1`
+
+<!-- CANONICAL BLOCK — mirrored verbatim in Kern-UI/README.md and Kern-Orch/README.md.
+     The same payload lives in contracts/kern.activity.v1.json in both repos, asserted from
+     both sides on every CI run. -->
+
+```json
+{
+  "run_id": "a23ead5373d9b746",
+  "graph": "hello",
+  "node_id": "greet",
+  "generating": true,
+  "at": "2026-07-26T12:00:01Z"
+}
+```
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `run_id` | string | yes | Identifies the run. |
+| `graph` | string | yes | Human label. Required because this event routinely opens a run. |
+| `node_id` | string | yes | The node whose model started or stopped. |
+| `generating` | bool | yes | `true` when the model began working, `false` when it finished. |
+| `at` | RFC 3339 | yes | When the transition happened. |
+
+**What kern-orch guarantees**
+
+- **The bracket always closes.** The stop is deferred, so it fires on every path out of an
+  agent node — including the failing ones — and it is reported on a detached context, since
+  a run is usually already cancelled by the time its last agent stops.
+- **The bracket opens at spawn, not at the first token.** A provider that answers in one
+  piece streams no token at all, and waiting for one would report such a node as never having
+  worked. What travels is the coarse fact: the model is working.
+- **Only agent nodes report.** A tool node runs Go code; no model is involved.
+- **Signals may arrive out of order**, being sent off-thread. Each carries `at` so a sink can
+  keep only the freshest word about a node.
+
+### Emitted — skills catalogue
+
+When `KERN_REGISTRY_REPORT_URL` is set, kern-orch POSTs its whole skills registry to that
+URL: once at the start of every `run`, and on demand via `kern-orch publish-skills`. Unset,
+it publishes nothing.
+
+It is a second variable rather than a route derived from `KERN_STEP_REPORT_URL`, for the
+reason stated above: the URL is the whole contract, so kern-orch must not invent a sibling
+path on a host it knows nothing about.
+
+#### `Catalogue` — contract `kern.registry/v1`
+
+<!-- CANONICAL BLOCK — mirrored verbatim in Kern-UI/README.md and Kern-Orch/README.md.
+     Drift is caught by tests, not by discipline: the same payload lives in
+     contracts/kern.registry.v1.json in both repos, and each side asserts against it on
+     every CI run — kern-orch that its publisher emits exactly this, kern-ui that its
+     ingestion accepts exactly this. Change the contract and both suites go red. -->
+
+```json
+{
+  "source": "kern-orch",
+  "at": "2026-07-27T12:00:00Z",
+  "skills": [
+    { "name": "Analyse", "kind": "tool", "description": "Décompose une demande." },
+    { "name": "Scribe", "kind": "agent", "description": "Rédige et reformule." }
+  ]
+}
+```
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `source` | string | yes | Which brick published this catalogue. |
+| `at` | RFC 3339 | yes | When it was read. |
+| `skills[]` | array | yes | Every skill the producer holds. May be empty. |
+| `skills[].name` | string | yes | The key. kern-orch already indexes its registry by name, so no second identifier was invented for the wire. |
+| `skills[].kind` | string | yes | `tool` or `agent` — the `type:` of the SKILL.md frontmatter. |
+| `skills[].description` | string | no | The frontmatter `description`, one line. |
+
+**What kern-orch guarantees**
+
+- **The catalogue is whole.** Each publication replaces the previous one; a skill removed
+  from disk disappears downstream on the next publication.
+- **Sorted by name**, so a sink never has to sort.
+- **Publishing never fails a run**, exactly like step reporting: a broken sink costs a line
+  on stderr and nothing else.
+
+**What deliberately does not travel.** A skill's directory — a filesystem path is an
+internal, not a contract. Its SKILL.md body. Any "wired" flag — a loaded skill is by
+definition available, so the field would read true on every row.
+
+### Asked for, not yet emitted
+
+Topology, failure and the skills registry have all shipped. One thing is still asked for:
+
+| What | Where it would live | Why kern-ui needs it |
+|---|---|---|
+| Tool invocation and readback | `internal/tools` | A consumer can list the wired tools but cannot ask any of them for a display value |
+
+Stated in full, with the other bricks' contracts, in
+[`../Kern-UI/docs/expected-contracts.md`](../Kern-UI/docs/expected-contracts.md).
 
 ### Not yet defined
 

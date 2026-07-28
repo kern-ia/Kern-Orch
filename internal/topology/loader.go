@@ -17,6 +17,10 @@ type Registry struct {
 	tools   map[string]graph.ToolFunc
 	routers map[string]graph.RouteFunc
 	runner  graph.AgentRunner
+
+	// childStep builds the hook a nested run reports through. Wiring, like the runner:
+	// it decides how a node is built, not what the graph means.
+	childStep func(nodeID, graphRef string) graph.StepFunc
 }
 
 // NewRegistry creates a registry; runner may be nil if the graph has no agent nodes.
@@ -31,6 +35,13 @@ func NewRegistry(runner graph.AgentRunner) *Registry {
 // Tool registers a tool function under name.
 func (r *Registry) Tool(name string, fn graph.ToolFunc) *Registry {
 	r.tools[name] = fn
+	return r
+}
+
+// OnChildStep makes every subgraph node report its nested run through the hook build
+// returns. Unset, nested runs stay invisible exactly as before.
+func (r *Registry) OnChildStep(build func(nodeID, graphRef string) graph.StepFunc) *Registry {
+	r.childStep = build
 	return r
 }
 
@@ -62,13 +73,14 @@ type spec struct {
 }
 
 // subResolver turns a subgraph node's file reference into a built nested graph.
-type subResolver func(nodeID, ref string) (*graph.Graph, error)
+// subResolver resolves a subgraph reference to a built graph and the file it came from.
+type subResolver func(nodeID, ref string) (*graph.Graph, string, error)
 
 // Load parses YAML and builds a graph from inline definitions. Subgraph nodes are not
 // supported here (they need file resolution) — use LoadFile for graphs with subgraphs.
 func Load(data []byte, reg *Registry) (*graph.Graph, error) {
-	noSub := func(nodeID, _ string) (*graph.Graph, error) {
-		return nil, fmt.Errorf("topology: node %q is a subgraph; load via a file with LoadFile", nodeID)
+	noSub := func(nodeID, _ string) (*graph.Graph, string, error) {
+		return nil, "", fmt.Errorf("topology: node %q is a subgraph; load via a file with LoadFile", nodeID)
 	}
 	return build(data, reg, noSub)
 }
@@ -104,11 +116,15 @@ func build(data []byte, reg *Registry, resolveSub subResolver) (*graph.Graph, er
 			if n.Graph == "" {
 				return nil, fmt.Errorf("topology: subgraph node %q missing `graph` file reference", n.ID)
 			}
-			sub, err := resolveSub(n.ID, n.Graph)
+			sub, ref, err := resolveSub(n.ID, n.Graph)
 			if err != nil {
 				return nil, err
 			}
-			g.AddNode(graph.NewSubgraphNode(n.ID, sub))
+			opts := []graph.SubgraphOption{graph.WithGraphRef(ref)}
+			if reg.childStep != nil {
+				opts = append(opts, graph.WithChildStep(reg.childStep))
+			}
+			g.AddNode(graph.NewSubgraphNode(n.ID, sub, opts...))
 		default:
 			return nil, fmt.Errorf("topology: node %q: invalid type %q (want tool|agent|subgraph)", n.ID, n.Type)
 		}

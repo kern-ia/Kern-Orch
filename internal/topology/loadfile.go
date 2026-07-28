@@ -31,16 +31,18 @@ func loadFile(abs string, reg *Registry, inProgress map[string]bool) (*graph.Gra
 		return nil, fmt.Errorf("topology: read %q: %w", abs, err)
 	}
 	dir := filepath.Dir(abs)
-	resolve := func(nodeID, ref string) (*graph.Graph, error) {
+	resolve := func(nodeID, ref string) (*graph.Graph, string, error) {
 		childAbs := ref
 		if !filepath.IsAbs(childAbs) {
 			childAbs = filepath.Join(dir, ref)
 		}
 		sub, err := loadFile(childAbs, reg, inProgress)
 		if err != nil {
-			return nil, fmt.Errorf("topology: subgraph node %q -> %w", nodeID, err)
+			return nil, "", fmt.Errorf("topology: subgraph node %q -> %w", nodeID, err)
 		}
-		return sub, nil
+		// The path travels back so a caller can describe the child's shape. The engine
+		// never reads it.
+		return sub, childAbs, nil
 	}
 	return build(data, reg, resolve)
 }

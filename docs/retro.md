@@ -64,3 +64,93 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
   par niveau. Acceptable en local ; à revoir si le sink devient distant.
 - Le state traverse aplati. Si un jour les zones ou le compteur de gel intéressent un
   observateur, c'est un ajout explicite au contrat, pas une sérialisation du State.
+
+## 2026-07-26 — topologie et échec
+
+**Ce qui a été découvert en implémentant**
+- Les arêtes du `Graph` runtime sont des `RouteFunc`. On ne peut donc pas exporter la
+  topologie depuis le moteur : il a fallu la relire du YAML. Une route conditionnelle reste
+  inconnaissable avant l'exécution, d'où le drapeau `dynamic` plutôt qu'une arête inventée.
+- Le hook `StepFunc` ne voit jamais un échec — le moteur le signale en retournant de `Run`.
+  Sans un appel dédié, un run cassé était indiscernable d'un run terminé côté sink.
+- Premier jet de `ReportFailure` : frontière vide. Résultat, le consommateur savait qu'un run
+  avait échoué mais pas où. La frontière active au moment de la casse est l'information utile.
+
+**À surveiller**
+- `stepCounter` mémorise niveau et frontière uniquement pour pouvoir rapporter l'échec. Si le
+  moteur exposait un jour l'erreur au hook, ce bricolage disparaîtrait.
+
+## 2026-07-27 — registry-contract
+
+**A fonctionné**
+- `RegistryPublisher` séparé de `HTTPReporter` plutôt qu'une méthode de plus : deux
+  endpoints, deux URL, deux responsabilités. `postJSON` extrait ensuite pour que la
+  plomberie HTTP reste unique.
+- Le test qui vérifie qu'aucun champ ne transporte le répertoire du skill
+  (`TestPublisherDoesNotLeakTheSkillDirectory`) : il interdit la fuite par n'importe quel
+  nom de champ, pas seulement par `dir`.
+
+**À surveiller**
+- `DeclaredNode` jetait la référence `skill:` que `nodeSpec` lisait déjà. Un champ parsé
+  puis abandonné en cours de route est un contrat qui manque en aval sans que rien ne le
+  signale.
+- `list-skills` code en dur `"skills"` comme défaut de `--skills-dir` au lieu de
+  `config.FromEnv().SkillsDir` : `KERN_SKILLS_DIR` est donc ignoré par cette commande.
+  `publish-skills` utilise la config. À aligner.
+
+## 2026-07-27 — activity-signal
+
+**A fonctionné**
+- Séparer `ActivityReporter` de `HTTPReporter` : les deux ont des exigences opposées
+  (l'un synchrone et ordonné entre niveaux, l'autre asynchrone au milieu du travail).
+  Une seule classe avec un booléen aurait caché ce désaccord.
+- `TestFlushWaitsForSignalsInFlight` compte les requêtes reçues : sans lui, un `Flush()`
+  oublié passe vert en local parce que le sink de test répond en une milliseconde.
+- Le sink lent (`newSlowSink`) prouve que `Report` ne bloque pas — une assertion qu'aucun
+  test de contenu ne peut faire.
+
+**À surveiller**
+- `newRunner` est appelé avant `newRunID()` : tout hook ayant besoin de l'identité du run
+  doit passer par un relais rempli après coup, pas par la construction du runner.
+- Le contexte du run est déjà annulé quand le dernier agent s'arrête. Tout rapport de fin
+  doit se détacher (`context.WithoutCancel`), sinon il n'est jamais envoyé.
+
+## 2026-07-28 — failing-node
+
+**A fonctionné**
+- `LevelError.Error()` reproduit exactement l'ancien message : le type de l'erreur a changé
+  sans qu'aucun test existant ne bouge. Changer la structure sans changer la surface.
+- Collecter toutes les erreurs du niveau avant d'en renvoyer une : `wg.Wait()` les avait
+  déjà toutes, n'en garder qu'une était une perte gratuite.
+
+**À surveiller**
+- Troisième fois qu'une donnée existe dans kern-orch et se perd avant le contrat (`skill`,
+  puis l'id du nœud en échec). Avant d'écrire un champ, chercher s'il n'est pas déjà calculé
+  quelque part et jeté.
+
+## 2026-07-28 — async-step-reporter
+
+**A fonctionné**
+- Mesurer avant/après avec un vrai puits lent plutôt que de déduire le gain. C'est la mesure
+  qui a révélé que le premier jet déplaçait l'attente du moteur vers la sortie du processus
+  au lieu de la supprimer.
+- Écrire le test d'ORDRE avant le code : c'est lui qui a imposé une file à un consommateur
+  unique plutôt qu'une goroutine par événement, qui aurait perdu des frontières en silence.
+
+**À surveiller**
+- Ordre requis ou non : l'activité tolère le désordre (garde par horodatage), les steps non
+  (repliés en séquence). Deux contrats, deux modèles de livraison — ne pas copier l'un sur
+  l'autre sans se poser la question.
+- Rendre asynchrone une livraison invalide tout test qui affirmait juste après l'appel. Neuf
+  ici. C'est le signe que le changement est réel, pas une gêne.
+
+## 2026-07-28 — nested-runs
+
+**A fonctionné**
+- Faire porter au nœud sa propre référence de fichier plutôt que de la chercher dans le
+  graphe : la recherche marchait à la profondeur 1 et aurait silencieusement échoué au-delà.
+  Un bug qui ne se voit pas dans les tests d'un seul niveau.
+
+**À surveiller**
+- Tout ce qui se branche via la `Registry` doit être posé AVANT `LoadFile` : les nœuds
+  reçoivent leurs options à la construction, pas à l'exécution.

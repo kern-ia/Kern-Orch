@@ -66,12 +66,14 @@ func TestHookPostsTheStepEvent(t *testing.T) {
 	r.now = fixedNow
 
 	state := graph.NewState()
-	state.Set("topic", "kern-ui")
+	state.Set("topic", "confinement")
 
-	hook := r.Hook("run-42", "review")
+	hook := r.Hook("run-42", "review", nil)
 	if err := hook(context.Background(), graph.StepInfo{Step: 2, Frontier: []string{"a", "b"}}, state); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
+
+	r.Flush()
 
 	body := s.last()
 	if body == nil {
@@ -102,9 +104,11 @@ func TestHookReportsAnEmptyFrontierSoTheSinkCanCloseTheRun(t *testing.T) {
 	r := NewHTTP(s.server.URL)
 	r.now = fixedNow
 
-	if err := r.Hook("run-42", "review")(context.Background(), graph.StepInfo{Step: 3}, graph.NewState()); err != nil {
+	if err := r.Hook("run-42", "review", nil)(context.Background(), graph.StepInfo{Step: 3}, graph.NewState()); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
+
+	r.Flush()
 
 	frontier, ok := s.last()["frontier"].([]any)
 	if !ok || len(frontier) != 0 {
@@ -118,12 +122,14 @@ func TestHookCarriesTheState(t *testing.T) {
 	r.now = fixedNow
 
 	state := graph.NewState()
-	state.Set("topic", "kern-ui")
+	state.Set("topic", "confinement")
 
-	_ = r.Hook("run-42", "review")(context.Background(), graph.StepInfo{Step: 1, Frontier: []string{"a"}}, state)
+	_ = r.Hook("run-42", "review", nil)(context.Background(), graph.StepInfo{Step: 1, Frontier: []string{"a"}}, state)
+
+	r.Flush()
 
 	got, ok := s.last()["state"].(map[string]any)
-	if !ok || got["topic"] != "kern-ui" {
+	if !ok || got["topic"] != "confinement" {
 		t.Errorf("state = %v, want the merged state", s.last()["state"])
 	}
 }
@@ -135,7 +141,7 @@ func TestHookNeverFailsTheRun(t *testing.T) {
 		"sink returns 500":    "",
 		"sink unreachable":    "http://127.0.0.1:1/steps",
 		"url is nonsense":     "://not-a-url",
-		"host does not exist": "http://kern-ui.invalid/steps",
+		"host does not exist": "http://sink.invalid/steps",
 	}
 
 	for name, url := range cases {
@@ -147,7 +153,7 @@ func TestHookNeverFailsTheRun(t *testing.T) {
 			r.now = fixedNow
 			r.Timeout = 200 * time.Millisecond
 
-			err := r.Hook("run-42", "review")(context.Background(), graph.StepInfo{Step: 1}, graph.NewState())
+			err := r.Hook("run-42", "review", nil)(context.Background(), graph.StepInfo{Step: 1}, graph.NewState())
 			if err != nil {
 				t.Errorf("hook returned %v, want nil — a reporter must never abort a run", err)
 			}
@@ -156,7 +162,7 @@ func TestHookNeverFailsTheRun(t *testing.T) {
 }
 
 func TestHookIsNilWhenNoURLIsConfigured(t *testing.T) {
-	if hook := NewHTTP("").Hook("run-42", "review"); hook != nil {
+	if hook := NewHTTP("").Hook("run-42", "review", nil); hook != nil {
 		t.Error("Hook() != nil for an unconfigured reporter, want nil so the caller can skip it")
 	}
 }
@@ -169,9 +175,11 @@ func TestHookStopsPostingOnceTheRunContextIsCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	if err := r.Hook("run-42", "review")(ctx, graph.StepInfo{Step: 1}, graph.NewState()); err != nil {
+	if err := r.Hook("run-42", "review", nil)(ctx, graph.StepInfo{Step: 1}, graph.NewState()); err != nil {
 		t.Errorf("hook: %v, want nil", err)
 	}
+	r.Flush()
+
 	if s.count() != 0 {
 		t.Errorf("the sink received %d requests, want 0 on a cancelled context", s.count())
 	}
@@ -192,4 +200,22 @@ func equalAny(got, want any) bool {
 		}
 	}
 	return true
+}
+
+// newSlowSink holds every request open until release is closed.
+func newSlowSink(t *testing.T, release <-chan struct{}) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		<-release
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// all returns every body the sink received, in arrival order.
+func (s *sink) all() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]map[string]any(nil), s.bodies...)
 }
