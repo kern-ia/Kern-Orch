@@ -18,9 +18,10 @@ import (
 type catalogueSink struct {
 	server *httptest.Server
 
-	mu   sync.Mutex
-	body map[string]any
-	hits int
+	mu     sync.Mutex
+	body   map[string]any
+	bodies []map[string]any
+	hits   int
 }
 
 func newCatalogueSink(t *testing.T) *catalogueSink {
@@ -32,6 +33,10 @@ func newCatalogueSink(t *testing.T) *catalogueSink {
 		defer s.mu.Unlock()
 		s.hits++
 		_ = json.Unmarshal(raw, &s.body)
+		var one map[string]any
+		if json.Unmarshal(raw, &one) == nil {
+			s.bodies = append(s.bodies, one)
+		}
 		w.WriteHeader(http.StatusAccepted)
 	}))
 	t.Cleanup(s.server.Close)
@@ -235,4 +240,59 @@ func TestRunIsNotSlowedByAnUnreachableSink(t *testing.T) {
 	if !strings.Contains(out, "completed") {
 		t.Errorf("output = %q, want the run to have completed", out)
 	}
+}
+
+// A subgraph must report as a run of its own, so the interface can draw what happens inside
+// a sub-agent instead of a single dot.
+func TestRunReportsANestedRunForASubgraph(t *testing.T) {
+	sink := newCatalogueSink(t)
+	dir := t.TempDir()
+
+	child := filepath.Join(dir, "child.yaml")
+	if err := os.WriteFile(child, []byte("entry: c1\nnodes:\n  - {id: c1, type: tool, func: seed}\n  - {id: c2, type: tool, func: double}\nedges:\n  - {from: c1, to: [c2]}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	parent := filepath.Join(dir, "parent.yaml")
+	if err := os.WriteFile(parent, []byte("entry: nested\nnodes:\n  - {id: nested, type: subgraph, graph: child.yaml}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv(config.EnvStepReportURL, sink.server.URL)
+	t.Setenv(config.EnvCheckpointDB, filepath.Join(dir, "k.db"))
+
+	if _, err := execute(t, "run", parent); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	var nested []map[string]any
+	for _, body := range sink.all() {
+		if p, ok := body["parent"].(map[string]any); ok {
+			if p["node_id"] != "nested" {
+				t.Errorf("parent.node_id = %v, want the subgraph node", p["node_id"])
+			}
+			nested = append(nested, body)
+		}
+	}
+	if len(nested) == 0 {
+		t.Fatal("the nested graph reported nothing; a sub-agent is still a single dot")
+	}
+
+	// Its own run id, its own level sequence — never folded into the parent's.
+	first := nested[0]
+	if first["run_id"] == "" || first["run_id"] == nil {
+		t.Error("the nested run has no id of its own")
+	}
+	if _, ok := first["topology"].(map[string]any); !ok {
+		t.Error("the nested run never declared its shape")
+	}
+	if first["graph"] != "child" {
+		t.Errorf("graph = %v, want the child's own name", first["graph"])
+	}
+}
+
+// all returns every body the sink received, in arrival order.
+func (s *catalogueSink) all() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]map[string]any(nil), s.bodies...)
 }

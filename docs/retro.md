@@ -143,3 +143,14 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
   l'autre sans se poser la question.
 - Rendre asynchrone une livraison invalide tout test qui affirmait juste après l'appel. Neuf
   ici. C'est le signe que le changement est réel, pas une gêne.
+
+## 2026-07-28 — nested-runs
+
+**A fonctionné**
+- Faire porter au nœud sa propre référence de fichier plutôt que de la chercher dans le
+  graphe : la recherche marchait à la profondeur 1 et aurait silencieusement échoué au-delà.
+  Un bug qui ne se voit pas dans les tests d'un seul niveau.
+
+**À surveiller**
+- Tout ce qui se branche via la `Registry` doit être posé AVANT `LoadFile` : les nœuds
+  reçoivent leurs options à la construction, pas à l'exécution.

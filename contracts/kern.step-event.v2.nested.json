@@ -1,0 +1,19 @@
+{
+  "run_id": "3f9c1a7e5b204d68",
+  "graph": "child",
+  "step": 1,
+  "frontier": ["verifie"],
+  "at": "2026-07-28T12:00:04Z",
+  "parent": {
+    "run_id": "a23ead5373d9b746",
+    "node_id": "nested"
+  },
+  "topology": {
+    "entry": "redige",
+    "nodes": [
+      { "id": "redige", "kind": "agent", "skill": "Scribe" },
+      { "id": "verifie", "kind": "tool" }
+    ],
+    "edges": [{ "from": "redige", "to": ["verifie"] }]
+  }
+}

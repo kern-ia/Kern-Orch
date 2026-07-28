@@ -161,6 +161,7 @@ sink needs no knowledge of kern-orch beyond the schema below. Today's consumer i
 | `topology.nodes[].skill` | string | no | The catalogue entry backing the node, as declared by `skill:` in the YAML. **Not the id** — a node `greet` may run the skill `planner`, so matching the two by name would be a guess. Absent on tool nodes, which name a Go function. |
 | `topology.edges[]` | object | no | `from`, `to[]`, or `dynamic: true` when a router picks the targets at run time. |
 | `error` | object | no | Set on the terminal event of a run that failed; `message` is required. |
+| `parent` | object | no | Set on a **nested run** — the graph a subgraph node ran. `run_id` is the parent run, `node_id` the node it belongs to. Absent on a top-level run. |
 | `error.nodes[]` | string[] | no | The nodes of `frontier` that actually broke. A node in `frontier` and **absent here completed** — the producer waits for the whole level before giving up. Omitted when the producer cannot say, and a consumer then falls back to marking the whole frontier. |
 
 kern-orch fills `graph` with the topology file name minus its extension, and `state`
