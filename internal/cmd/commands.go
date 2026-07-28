@@ -30,6 +30,7 @@ func newRunCmd() *cobra.Command {
 			runID := newRunID()
 			name := graphName(graphPath)
 			reporter := report.NewHTTP(cfg.StepReportURL)
+			reporter.Token = cfg.SinkToken
 			// Levels are delivered off the engine's thread, so the last one — and the
 			// failure that may follow it — would die with this process without a flush.
 			defer reporter.Flush()
@@ -62,6 +63,7 @@ func newRunCmd() *cobra.Command {
 			// the last one a run emits, and it is exactly the one a process exiting would
 			// drop — leaving a beacon lit over a run that is long over.
 			activityReporter := report.NewActivityReporter(cfg.ActivityReportURL)
+			activityReporter.Token = cfg.SinkToken
 			activity.fn = func(nodeID string, generating bool) {
 				activityReporter.Report(cmd.Context(), runID, name, nodeID, generating)
 			}
@@ -122,6 +124,7 @@ func newResumeCmd() *cobra.Command {
 			activity := &activityRelay{}
 			name := graphName(graphPath)
 			reporter := report.NewHTTP(cfg.StepReportURL)
+			reporter.Token = cfg.SinkToken
 			defer reporter.Flush()
 
 			reg := builtinRegistry(newRunner(cfg, activity))
@@ -134,6 +137,7 @@ func newResumeCmd() *cobra.Command {
 			steps := &stepCounter{last: rec.Step}
 
 			activityReporter := report.NewActivityReporter(cfg.ActivityReportURL)
+			activityReporter.Token = cfg.SinkToken
 			activity.fn = func(nodeID string, generating bool) {
 				activityReporter.Report(cmd.Context(), runID, name, nodeID, generating)
 			}

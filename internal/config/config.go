@@ -23,6 +23,10 @@ const (
 	// node starts and stops working. Same reasoning as the two above: its own URL, because
 	// a sibling route cannot be invented for a host we know nothing about.
 	EnvActivityReportURL = "KERN_ACTIVITY_REPORT_URL"
+	// EnvSinkToken is the credential presented to every sink above. One secret for the three
+	// URLs: they are three contracts to the same consumer, and asking an operator to manage
+	// three secrets would mostly produce three copies of one.
+	EnvSinkToken = "KERN_SINK_TOKEN"
 )
 
 // Config is the resolved runtime configuration.
@@ -36,6 +40,8 @@ type Config struct {
 	RegistryReportURL string
 	// ActivityReportURL is an HTTP sink for agent activity; empty => no reporting.
 	ActivityReportURL string
+	// SinkToken is presented to the sinks above; empty => reports travel anonymous.
+	SinkToken string
 }
 
 // FromEnv builds a Config from the environment, applying defaults for unset variables.
@@ -47,6 +53,7 @@ func FromEnv() Config {
 		StepReportURL:     os.Getenv(EnvStepReportURL),
 		RegistryReportURL: os.Getenv(EnvRegistryReportURL),
 		ActivityReportURL: os.Getenv(EnvActivityReportURL),
+		SinkToken:         os.Getenv(EnvSinkToken),
 	}
 }
 

@@ -137,6 +137,7 @@ func flatten(s *graph.State) map[string]any {
 // the reporter knows nothing of the sink's route shape.
 type HTTPReporter struct {
 	URL     string
+	Token   string // presented as a bearer credential; empty sends no header
 	Timeout time.Duration
 	Client  *http.Client
 
@@ -313,17 +314,20 @@ func nonNil(frontier []string) []string {
 }
 
 func (r *HTTPReporter) send(ctx context.Context, ev StepEvent) error {
-	return postJSONWith(ctx, r.client(), r.URL, r.timeout(), ev)
+	return postJSONWith(ctx, r.client(), r.URL, r.Token, r.timeout(), ev)
 }
 
 // postJSON marshals payload and POSTs it, using the default client. Shared by the step
 // reporter and the registry publisher: one way to talk to a sink, so a timeout or an error
 // message never depends on which contract is travelling.
-func postJSON(ctx context.Context, url string, timeout time.Duration, payload any) error {
-	return postJSONWith(ctx, http.DefaultClient, url, timeout, payload)
+func postJSON(ctx context.Context, url, token string, timeout time.Duration, payload any) error {
+	return postJSONWith(ctx, http.DefaultClient, url, token, timeout, payload)
 }
 
-func postJSONWith(ctx context.Context, client *http.Client, url string, timeout time.Duration, payload any) error {
+// token is presented as a bearer credential when set. An empty one sends **no header** at
+// all rather than an empty bearer: a credential that says "I tried" is worse than none, and
+// a sink should see an anonymous caller rather than a malformed one.
+func postJSONWith(ctx context.Context, client *http.Client, url, token string, timeout time.Duration, payload any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("encode: %w", err)
@@ -337,6 +341,9 @@ func postJSONWith(ctx context.Context, client *http.Client, url string, timeout 
 		return fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
