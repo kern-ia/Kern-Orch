@@ -174,3 +174,19 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
 - Un run lancé par le démon persiste après l'arrêt du process (checkpoint SQLite), mais rien
   ne le relance automatiquement au redémarrage. `resume` reste manuel — pas encore de
   reprise automatique des runs `running` trouvés au démarrage de `serve`.
+
+## 2026-07-29 — tool-invocation (clôture EPIC-03)
+
+**A fonctionné**
+- Réutiliser tel quel le protocole subprocess d'`agentrunner` (stdin JSON → stdout JSON,
+  pattern `TestHelperProcess`) plutôt que d'en inventer un nouveau pour les tools : même
+  vérification (avant de spawner) et même style de test, une seule idée à retenir.
+
+**À surveiller** *(générique — remonté aussi dans `pieges.md`)*
+- Une struct Go sans tag `json:"..."` sérialise en PascalCase. `go test` ne le voit jamais
+  (comparaison sur la struct, pas sur le JSON brut) — seul un vrai `curl` contre le serveur
+  l'a révélé, alors que `internal/checkpoint.Record`/`Summary` ont le même défaut, non
+  détecté faute d'un client externe qui les ait encore lus au clavier.
+- `checkpoint.Record`/`Summary` restent PascalCase sur le fil — noté ici mais volontairement
+  pas corrigé maintenant : personne ne les consomme encore, corriger en dehors du périmètre
+  demandé aurait été un changement non sollicité sur un contrat déjà « in use » côté C1-C4.
