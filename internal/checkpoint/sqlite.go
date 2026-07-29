@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS checkpoints (
 	status     TEXT    NOT NULL,
 	created_at TEXT    NOT NULL,
 	graph_path TEXT    NOT NULL DEFAULT '',
+	requester  TEXT    NOT NULL DEFAULT '',
 	PRIMARY KEY (run_id, step)
 );`
 
@@ -28,12 +29,26 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
+// busyTimeoutMS bounds how long a writer/reader waits on SQLITE_BUSY instead of failing
+// immediately. C6 made this load-bearing rather than theoretical: StopRun/Nudge/Decide
+// read the latest checkpoint (for the requester check) at the same time a live run's own
+// goroutine may be writing one — a real concurrent access this store never had before.
+const busyTimeoutMS = 5000
+
 // OpenSQLite opens (creating if needed) the checkpoint database at path and ensures
 // the schema exists.
 func OpenSQLite(path string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("checkpoint: open %q: %w", path, err)
+	}
+	// SQLite's busy_timeout is per-connection state, and database/sql may otherwise open
+	// several. Pinning the pool to one connection is what makes the pragma below actually
+	// apply to every access rather than to whichever connection happened to be first.
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA busy_timeout=%d;", busyTimeoutMS)); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("checkpoint: set busy_timeout: %w", err)
 	}
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
@@ -60,12 +75,13 @@ func (s *SQLiteStore) Save(ctx context.Context, r Record) error {
 		created = time.Now().UTC()
 	}
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO checkpoints (run_id, step, frontier, state, status, created_at, graph_path)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO checkpoints (run_id, step, frontier, state, status, created_at, graph_path, requester)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(run_id, step) DO UPDATE SET
 		   frontier=excluded.frontier, state=excluded.state,
-		   status=excluded.status, created_at=excluded.created_at, graph_path=excluded.graph_path`,
-		r.RunID, r.Step, string(frontier), string(state), r.Status, created.Format(time.RFC3339Nano), r.GraphPath)
+		   status=excluded.status, created_at=excluded.created_at, graph_path=excluded.graph_path,
+		   requester=excluded.requester`,
+		r.RunID, r.Step, string(frontier), string(state), r.Status, created.Format(time.RFC3339Nano), r.GraphPath, r.Requester)
 	if err != nil {
 		return fmt.Errorf("checkpoint: save: %w", err)
 	}
@@ -75,14 +91,14 @@ func (s *SQLiteStore) Save(ctx context.Context, r Record) error {
 // Latest returns the highest-step checkpoint for runID; ok is false if none exists.
 func (s *SQLiteStore) Latest(ctx context.Context, runID string) (Record, bool, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT step, frontier, state, status, created_at, graph_path
+		`SELECT step, frontier, state, status, created_at, graph_path, requester
 		 FROM checkpoints WHERE run_id = ? ORDER BY step DESC LIMIT 1`, runID)
 	var (
-		step                      int
-		frontier, state           string
-		status, createdStr, gpath string
+		step                                 int
+		frontier, state                      string
+		status, createdStr, gpath, requester string
 	)
-	switch err := row.Scan(&step, &frontier, &state, &status, &createdStr, &gpath); err {
+	switch err := row.Scan(&step, &frontier, &state, &status, &createdStr, &gpath, &requester); err {
 	case sql.ErrNoRows:
 		return Record{}, false, nil
 	case nil:
@@ -91,7 +107,7 @@ func (s *SQLiteStore) Latest(ctx context.Context, runID string) (Record, bool, e
 		return Record{}, false, fmt.Errorf("checkpoint: latest: %w", err)
 	}
 
-	rec := Record{RunID: runID, Step: step, Status: status, State: graph.NewState(), GraphPath: gpath}
+	rec := Record{RunID: runID, Step: step, Status: status, State: graph.NewState(), GraphPath: gpath, Requester: requester}
 	if err := json.Unmarshal([]byte(frontier), &rec.Frontier); err != nil {
 		return Record{}, false, fmt.Errorf("checkpoint: decode frontier: %w", err)
 	}

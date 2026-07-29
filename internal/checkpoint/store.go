@@ -43,6 +43,10 @@ type Record struct {
 	// GraphPath is the source graph file the run was launched from, so `resume` can
 	// reload it without the caller re-supplying the path.
 	GraphPath string
+	// Requester names who asked for this run. Empty means open — steerable by anyone,
+	// which is what every CLI-started run is today. C6's write path (stop/nudge/decide)
+	// checks this against the caller before acting.
+	Requester string
 }
 
 // Summary is a per-run rollup for the `status` command.

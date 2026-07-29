@@ -190,3 +190,29 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
 - `checkpoint.Record`/`Summary` restent PascalCase sur le fil — noté ici mais volontairement
   pas corrigé maintenant : personne ne les consomme encore, corriger en dehors du périmètre
   demandé aurait été un changement non sollicité sur un contrat déjà « in use » côté C1-C4.
+
+## 2026-07-29 — c6-steer
+
+**A fonctionné**
+- Chercher d'abord si une mécanique existante couvrait déjà le besoin, avant d'en écrire
+  une nouvelle : l'approbation réutilise le concurrency model du moteur (un nœud lent bloque
+  déjà sa goroutine), `stop` réutilise le chemin d'échec (`exec.CommandContext` tue déjà un
+  subprocess sur annulation de contexte). Deux des trois opérations de C6 n'ont ajouté
+  aucune mécanique au moteur — seulement `nudge` (le hook `OnBeforeLevel`) était réellement
+  neuf.
+- Vérifier en réel avec `curl` a immédiatement révélé un bug de concurrence
+  (`SQLITE_BUSY`) que `go test` seul (bases isolées par test) ne pouvait pas voir : lire le
+  checkpoint pendant qu'un run l'écrit est un accès concurrent que rien n'exerçait avant
+  C6. La dette était déjà notée le tout premier jour du projet (2026-07-20, bootstrap) et a
+  fini par mordre exactement là où elle avait été prédite.
+
+**À surveiller**
+- Un run stoppé ou dont un nœud échoue ne persiste jamais `checkpoint.StatusFailed` — la
+  constante existe mais n'est écrite nulle part ; le dernier checkpoint garde le statut
+  `running`. La preuve de `stop` dans les tests passe par l'absence de mailbox après coup,
+  pas par un statut lisible en base. Un jour où quelqu'un affiche l'état d'un run stoppé
+  depuis kern-ui, ce trou devra se combler.
+- `nudge`/`decide`/`stop` sur un run existant mais pas "vivant" (déjà terminé, ou pas encore
+  repris après un redémarrage) renvoient tous la même erreur générique 400. Pas encore un
+  statut HTTP dédié — acceptable pour une V1, à revisiter si un client a besoin de distinguer
+  les cas.

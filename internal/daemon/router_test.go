@@ -37,6 +37,23 @@ type fakeRunner struct {
 	invokeUnknown bool
 	invokeResult  tools.Result
 	invokeErr     error
+
+	startedRequesters []string // requester passed to each StartRun call
+
+	stopped       []call
+	stopUnknown   bool
+	stopForbidden bool
+	stopErr       error
+
+	nudged         []nudgeCall
+	nudgeUnknown   bool
+	nudgeForbidden bool
+	nudgeErr       error
+
+	decided         []decideCall
+	decideUnknown   bool
+	decideForbidden bool
+	decideErr       error
 }
 
 type invocation struct {
@@ -44,12 +61,58 @@ type invocation struct {
 	input map[string]any
 }
 
-func (f *fakeRunner) StartRun(_ context.Context, graphPath string) (string, error) {
+type call struct{ runID, actor string }
+
+type nudgeCall struct {
+	runID, actor, key string
+	value             any
+}
+
+type decideCall struct{ runID, nodeID, actor, decision string }
+
+func (f *fakeRunner) StartRun(_ context.Context, graphPath, requester string) (string, error) {
 	f.started = append(f.started, graphPath)
+	f.startedRequesters = append(f.startedRequesters, requester)
 	if f.startErr != nil {
 		return "", f.startErr
 	}
 	return f.startID, nil
+}
+
+func (f *fakeRunner) StopRun(_ context.Context, runID, actor string) error {
+	f.stopped = append(f.stopped, call{runID, actor})
+	switch {
+	case f.stopUnknown:
+		return ErrUnknownRun
+	case f.stopForbidden:
+		return ErrForbidden
+	default:
+		return f.stopErr
+	}
+}
+
+func (f *fakeRunner) Nudge(_ context.Context, runID, actor, key string, value any) error {
+	f.nudged = append(f.nudged, nudgeCall{runID, actor, key, value})
+	switch {
+	case f.nudgeUnknown:
+		return ErrUnknownRun
+	case f.nudgeForbidden:
+		return ErrForbidden
+	default:
+		return f.nudgeErr
+	}
+}
+
+func (f *fakeRunner) Decide(_ context.Context, runID, nodeID, actor, decision string) error {
+	f.decided = append(f.decided, decideCall{runID, nodeID, actor, decision})
+	switch {
+	case f.decideUnknown:
+		return ErrUnknownNode
+	case f.decideForbidden:
+		return ErrForbidden
+	default:
+		return f.decideErr
+	}
 }
 
 func (f *fakeRunner) ResumeRun(_ context.Context, runID string) error {
@@ -114,6 +177,9 @@ func TestEveryOtherEndpointRefusesAnAnonymousCaller(t *testing.T) {
 		{http.MethodPost, "/api/v1/runs/r1/resume"},
 		{http.MethodGet, "/api/v1/tools"},
 		{http.MethodPost, "/api/v1/tools/greeting/invoke"},
+		{http.MethodPost, "/api/v1/runs/r1/stop"},
+		{http.MethodPost, "/api/v1/runs/r1/nudge"},
+		{http.MethodPost, "/api/v1/runs/r1/nodes/confirm/decide"},
 	}
 	for _, c := range cases {
 		t.Run(c.method+" "+c.path, func(t *testing.T) {
@@ -175,6 +241,40 @@ func TestStartingARunReturnsItsID(t *testing.T) {
 	}
 	if len(f.started) != 1 || f.started[0] != "examples/hello.yaml" {
 		t.Errorf("StartRun called with %v, want [examples/hello.yaml]", f.started)
+	}
+}
+
+func TestStartingARunPassesTheRequesterThrough(t *testing.T) {
+	f := &fakeRunner{startID: "a1b2c3"}
+	h := router(t, f, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"graph":"examples/hello.yaml","requester":"yoann"}`
+	h.ServeHTTP(rec, authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs", bytes.NewReader([]byte(body)))))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body)
+	}
+	if len(f.startedRequesters) != 1 || f.startedRequesters[0] != "yoann" {
+		t.Errorf("requester passed to StartRun = %v, want [yoann]", f.startedRequesters)
+	}
+}
+
+// A caller who never mentions a requester gets an open run — the default that keeps every
+// CLI-started run steerable by anyone, unchanged.
+func TestStartingARunWithNoRequesterIsFine(t *testing.T) {
+	f := &fakeRunner{startID: "a1b2c3"}
+	h := router(t, f, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"graph":"examples/hello.yaml"}`
+	h.ServeHTTP(rec, authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs", bytes.NewReader([]byte(body)))))
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body)
+	}
+	if len(f.startedRequesters) != 1 || f.startedRequesters[0] != "" {
+		t.Errorf("requester = %v, want [\"\"]", f.startedRequesters)
 	}
 }
 
@@ -340,6 +440,156 @@ func TestInvokingAToolSurfacesAValidationFailure(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/tools/greeting/invoke", bytes.NewReader([]byte(`{}`))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestStoppingARun(t *testing.T) {
+	f := &fakeRunner{}
+	h := router(t, f, token)
+
+	rec := httptest.NewRecorder()
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/r1/stop", bytes.NewReader([]byte(`{"actor":"yoann"}`))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body)
+	}
+	if len(f.stopped) != 1 || f.stopped[0] != (call{"r1", "yoann"}) {
+		t.Errorf("StopRun called with %+v, want [{r1 yoann}]", f.stopped)
+	}
+}
+
+func TestStoppingAnUnknownRunIs404(t *testing.T) {
+	h := router(t, &fakeRunner{stopUnknown: true}, token)
+
+	rec := httptest.NewRecorder()
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/jamais/stop", bytes.NewReader([]byte(`{}`))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestStoppingSomeoneElsesRunIs403(t *testing.T) {
+	h := router(t, &fakeRunner{stopForbidden: true}, token)
+
+	rec := httptest.NewRecorder()
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/r1/stop", bytes.NewReader([]byte(`{"actor":"pas-le-demandeur"}`))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestNudgingARun(t *testing.T) {
+	f := &fakeRunner{}
+	h := router(t, f, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"actor":"yoann","key":"message","value":"bonjour"}`
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/r1/nudge", bytes.NewReader([]byte(body))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202: %s", rec.Code, rec.Body)
+	}
+	if len(f.nudged) != 1 || f.nudged[0].key != "message" || f.nudged[0].value != "bonjour" {
+		t.Errorf("Nudge called with %+v", f.nudged)
+	}
+}
+
+func TestNudgingRejectsAnEmptyKey(t *testing.T) {
+	h := router(t, &fakeRunner{}, token)
+
+	rec := httptest.NewRecorder()
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/r1/nudge", bytes.NewReader([]byte(`{"value":"x"}`))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestNudgingAnUnknownRunIs404(t *testing.T) {
+	h := router(t, &fakeRunner{nudgeUnknown: true}, token)
+
+	rec := httptest.NewRecorder()
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/jamais/nudge", bytes.NewReader([]byte(`{"key":"x","value":"y"}`))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestNudgingSomeoneElsesRunIs403(t *testing.T) {
+	h := router(t, &fakeRunner{nudgeForbidden: true}, token)
+
+	rec := httptest.NewRecorder()
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/r1/nudge", bytes.NewReader([]byte(`{"key":"x","value":"y"}`))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestDecidingAnApprovalNode(t *testing.T) {
+	f := &fakeRunner{}
+	h := router(t, f, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"actor":"yoann","decision":"approve"}`
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/r1/nodes/confirm/decide", bytes.NewReader([]byte(body))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	want := decideCall{"r1", "confirm", "yoann", "approve"}
+	if len(f.decided) != 1 || f.decided[0] != want {
+		t.Errorf("Decide called with %+v, want [%+v]", f.decided, want)
+	}
+}
+
+func TestDecidingAnUnknownNodeIs404(t *testing.T) {
+	h := router(t, &fakeRunner{decideUnknown: true}, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"decision":"approve"}`
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/r1/nodes/jamais/decide", bytes.NewReader([]byte(body))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestDecidingSomeoneElsesRunIs403(t *testing.T) {
+	h := router(t, &fakeRunner{decideForbidden: true}, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"decision":"approve"}`
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/r1/nodes/confirm/decide", bytes.NewReader([]byte(body))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", rec.Code)
+	}
+}
+
+func TestDecidingSurfacesAnInvalidDecisionValue(t *testing.T) {
+	h := router(t, &fakeRunner{decideErr: errors.New(`invalid decision "maybe" (want approve|refuse)`)}, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"decision":"maybe"}`
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/r1/nodes/confirm/decide", bytes.NewReader([]byte(body))))
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {

@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/yoann/kern-orch/internal/graph"
 	"github.com/yoann/kern-orch/internal/report"
 	"github.com/yoann/kern-orch/internal/skills"
+	"github.com/yoann/kern-orch/internal/steer"
 	"github.com/yoann/kern-orch/internal/tools"
 	"github.com/yoann/kern-orch/internal/topology"
 )
@@ -33,6 +35,8 @@ type preparedRun struct {
 	graph            *graph.Graph
 	graphPath        string
 	name             string
+	requester        string
+	mailbox          *steer.Mailbox
 	reporter         *report.HTTPReporter
 	activity         *activityRelay
 	activityReporter *report.ActivityReporter
@@ -40,7 +44,11 @@ type preparedRun struct {
 
 // prepareRun builds the graph and wires every reporter run/resume/the daemon share. It
 // touches no store and starts no engine — see preparedRun.
-func prepareRun(cfg config.Config, runID, graphPath string) (*preparedRun, error) {
+//
+// mailbox is C6's steer surface for this run — nil for the bare CLI's `run`/`resume`,
+// which has nothing live to answer an approval or a nudge through. A graph containing an
+// approval node refuses to load in that case (see wireApproval), rather than hang forever.
+func prepareRun(cfg config.Config, runID, graphPath, requester string, mailbox *steer.Mailbox) (*preparedRun, error) {
 	activity := &activityRelay{}
 	reporter := report.NewHTTP(cfg.StepReportURL)
 	reporter.Token = cfg.SinkToken
@@ -49,6 +57,7 @@ func prepareRun(cfg config.Config, runID, graphPath string) (*preparedRun, error
 	// construction time.
 	reg := builtinRegistry(newRunner(cfg, activity), cfg)
 	nestedRuns(reg, reporter, runID)
+	wireApproval(reg, mailbox)
 
 	g, err := topology.LoadFile(graphPath, reg)
 	if err != nil {
@@ -63,7 +72,7 @@ func prepareRun(cfg config.Config, runID, graphPath string) (*preparedRun, error
 	}
 
 	return &preparedRun{
-		graph: g, graphPath: graphPath, name: name,
+		graph: g, graphPath: graphPath, name: name, requester: requester, mailbox: mailbox,
 		reporter: reporter, activity: activity, activityReporter: activityReporter,
 	}, nil
 }
@@ -78,12 +87,18 @@ func (p *preparedRun) run(ctx context.Context, store *checkpoint.SQLiteStore, ru
 
 	steps := &stepCounter{}
 	hook := multiStep(
-		checkpointHook(store, runID, p.graphPath),
+		checkpointHook(store, runID, p.graphPath, p.requester),
 		steps.count,
 		p.reporter.Hook(runID, p.name, describeTopology(p.graphPath)),
 	)
 
 	engine := graph.NewEngine(p.graph).OnStep(hook)
+	if p.mailbox != nil {
+		engine.OnBeforeLevel(func(_ context.Context, s *graph.State) error {
+			p.mailbox.DrainNudges(s)
+			return nil
+		})
+	}
 
 	var err error
 	if resume != nil {
@@ -104,34 +119,74 @@ func (p *preparedRun) run(ctx context.Context, store *checkpoint.SQLiteStore, ru
 type daemonRunner struct {
 	cfg   config.Config
 	store *checkpoint.SQLiteStore
+
+	mu        sync.Mutex
+	mailboxes map[string]*steer.Mailbox
+}
+
+// registerMailbox creates and stores the mailbox a live run's steer endpoints reach it
+// through, keyed by run id. Removed once the run's own goroutine finishes (see StartRun/
+// ResumeRun) — a finished run has nothing left to steer.
+func (d *daemonRunner) registerMailbox(runID string, cancel context.CancelFunc) *steer.Mailbox {
+	m := steer.NewMailbox(cancel)
+	d.mu.Lock()
+	if d.mailboxes == nil {
+		d.mailboxes = make(map[string]*steer.Mailbox)
+	}
+	d.mailboxes[runID] = m
+	d.mu.Unlock()
+	return m
+}
+
+func (d *daemonRunner) unregisterMailbox(runID string) {
+	d.mu.Lock()
+	delete(d.mailboxes, runID)
+	d.mu.Unlock()
+}
+
+func (d *daemonRunner) mailboxFor(runID string) (*steer.Mailbox, bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	m, ok := d.mailboxes[runID]
+	return m, ok
 }
 
 // StartRun prepares and validates the graph synchronously — a caller learns about a bad
 // path or a bad graph immediately — then runs it in the background. A queued checkpoint is
 // written before returning, so a status query racing the response never finds nothing.
-func (d *daemonRunner) StartRun(ctx context.Context, graphPath string) (string, error) {
+// requester is recorded on every checkpoint; empty leaves the run open to any actor.
+func (d *daemonRunner) StartRun(ctx context.Context, graphPath, requester string) (string, error) {
 	abs, err := filepath.Abs(graphPath)
 	if err != nil {
 		return "", err
 	}
 	runID := newRunID()
 
-	prepared, err := prepareRun(d.cfg, runID, abs)
+	// The run's own context, not ctx: the HTTP request that started it returns long
+	// before the run does. Its cancel func is C6's stop — the same shape agentrunner's
+	// exec.CommandContext already uses to kill an in-flight subprocess node.
+	runCtx, cancel := context.WithCancel(context.Background())
+	mailbox := d.registerMailbox(runID, cancel)
+
+	prepared, err := prepareRun(d.cfg, runID, abs, requester, mailbox)
 	if err != nil {
+		cancel()
+		d.unregisterMailbox(runID)
 		return "", err
 	}
 
 	if err := d.store.Save(ctx, checkpoint.Record{
 		RunID: runID, Step: checkpoint.QueuedStep, State: graph.NewState(),
-		Status: checkpoint.StatusQueued, GraphPath: abs,
+		Status: checkpoint.StatusQueued, GraphPath: abs, Requester: requester,
 	}); err != nil {
+		cancel()
+		d.unregisterMailbox(runID)
 		return "", err
 	}
 
 	go func() {
-		// Detached from the request: the HTTP response returns long before the run does,
-		// and its context would already be cancelled.
-		if err := prepared.run(context.Background(), d.store, runID, nil); err != nil {
+		defer d.unregisterMailbox(runID)
+		if err := prepared.run(runCtx, d.store, runID, nil); err != nil {
 			slog.Error("kern-orch: run failed", "run_id", runID, "error", err)
 			return
 		}
@@ -157,13 +212,19 @@ func (d *daemonRunner) ResumeRun(ctx context.Context, runID string) error {
 		return fmt.Errorf("run %q has no recorded graph path", runID)
 	}
 
-	prepared, err := prepareRun(d.cfg, runID, rec.GraphPath)
+	runCtx, cancel := context.WithCancel(context.Background())
+	mailbox := d.registerMailbox(runID, cancel)
+
+	prepared, err := prepareRun(d.cfg, runID, rec.GraphPath, rec.Requester, mailbox)
 	if err != nil {
+		cancel()
+		d.unregisterMailbox(runID)
 		return err
 	}
 
 	go func() {
-		if err := prepared.run(context.Background(), d.store, runID, &rec); err != nil {
+		defer d.unregisterMailbox(runID)
+		if err := prepared.run(runCtx, d.store, runID, &rec); err != nil {
 			slog.Error("kern-orch: resumed run failed", "run_id", runID, "error", err)
 			return
 		}
@@ -178,6 +239,103 @@ func (d *daemonRunner) ListRuns(ctx context.Context) ([]checkpoint.Summary, erro
 
 func (d *daemonRunner) GetRun(ctx context.Context, runID string) (checkpoint.Record, bool, error) {
 	return d.store.Latest(ctx, runID)
+}
+
+// authorized reports whether actor may steer a run whose checkpoint names requester —
+// empty means open, the default every run has until a caller supplies one.
+func authorized(requester, actor string) bool {
+	return requester == "" || requester == actor
+}
+
+// notLive is what StopRun/Nudge/Decide return for a run that exists but has no mailbox —
+// already finished, or never actually started live in this process (e.g. right after a
+// restart, before anyone has resumed it). Steering nothing is not the same fact as
+// steering an unknown run, but v1 does not yet give it its own HTTP status: it reads as
+// 400, a request that cannot be satisfied right now.
+func notLive(runID string) error {
+	return fmt.Errorf("run %q is not currently live", runID)
+}
+
+// StopRun cancels a live run's context. The same mechanism already kills an in-flight
+// subprocess node (agentrunner.Subprocess uses exec.CommandContext) — stopping a run is
+// just that, triggered by a person instead of a timeout.
+func (d *daemonRunner) StopRun(ctx context.Context, runID, actor string) error {
+	rec, ok, err := d.store.Latest(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return daemon.ErrUnknownRun
+	}
+	if !authorized(rec.Requester, actor) {
+		return daemon.ErrForbidden
+	}
+	m, ok := d.mailboxFor(runID)
+	if !ok {
+		return notLive(runID)
+	}
+	m.Stop()
+	return nil
+}
+
+// Nudge queues a state key/value for the next level of a live run to pick up.
+func (d *daemonRunner) Nudge(ctx context.Context, runID, actor, key string, value any) error {
+	rec, ok, err := d.store.Latest(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return daemon.ErrUnknownRun
+	}
+	if !authorized(rec.Requester, actor) {
+		return daemon.ErrForbidden
+	}
+	m, ok := d.mailboxFor(runID)
+	if !ok {
+		return notLive(runID)
+	}
+	m.Nudge(key, value)
+	return nil
+}
+
+// Decide answers a pending approval node.
+func (d *daemonRunner) Decide(ctx context.Context, runID, nodeID, actor, decision string) error {
+	rec, ok, err := d.store.Latest(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return daemon.ErrUnknownRun
+	}
+	if !authorized(rec.Requester, actor) {
+		return daemon.ErrForbidden
+	}
+	d2, err := parseDecision(decision)
+	if err != nil {
+		return err
+	}
+	m, ok := d.mailboxFor(runID)
+	if !ok {
+		return notLive(runID)
+	}
+	if err := m.Decide(nodeID, d2); err != nil {
+		if errors.Is(err, steer.ErrNoPendingDecision) {
+			return daemon.ErrUnknownNode
+		}
+		return err
+	}
+	return nil
+}
+
+// parseDecision validates the wire value against the two the engine understands — an
+// invalid one is the caller's mistake, reported as such rather than silently defaulted.
+func parseDecision(s string) (graph.Decision, error) {
+	switch graph.Decision(s) {
+	case graph.Approved, graph.Refused:
+		return graph.Decision(s), nil
+	default:
+		return "", fmt.Errorf("invalid decision %q (want %q or %q)", s, graph.Approved, graph.Refused)
+	}
 }
 
 // ListTools returns every loaded skill invocable as a tool (type: tool, a declared
