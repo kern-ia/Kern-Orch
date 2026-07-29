@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/yoann/kern-orch/internal/checkpoint"
+	"github.com/yoann/kern-orch/internal/tools"
 )
 
 // fakeRunner is a Runner a test can script without touching the engine or a real database.
@@ -28,6 +29,19 @@ type fakeRunner struct {
 	get    checkpoint.Record
 	getOK  bool
 	getErr error
+
+	toolSpecs    []tools.Spec
+	listToolsErr error
+
+	invoked       []invocation // calls received by InvokeTool
+	invokeUnknown bool
+	invokeResult  tools.Result
+	invokeErr     error
+}
+
+type invocation struct {
+	name  string
+	input map[string]any
 }
 
 func (f *fakeRunner) StartRun(_ context.Context, graphPath string) (string, error) {
@@ -52,6 +66,18 @@ func (f *fakeRunner) ListRuns(context.Context) ([]checkpoint.Summary, error) {
 
 func (f *fakeRunner) GetRun(context.Context, string) (checkpoint.Record, bool, error) {
 	return f.get, f.getOK, f.getErr
+}
+
+func (f *fakeRunner) ListTools(context.Context) ([]tools.Spec, error) {
+	return f.toolSpecs, f.listToolsErr
+}
+
+func (f *fakeRunner) InvokeTool(_ context.Context, name string, input map[string]any) (tools.Result, error) {
+	f.invoked = append(f.invoked, invocation{name: name, input: input})
+	if f.invokeUnknown {
+		return tools.Result{}, ErrUnknownTool
+	}
+	return f.invokeResult, f.invokeErr
 }
 
 const token = "un-secret-de-daemon"
@@ -86,6 +112,8 @@ func TestEveryOtherEndpointRefusesAnAnonymousCaller(t *testing.T) {
 		{http.MethodGet, "/api/v1/runs"},
 		{http.MethodGet, "/api/v1/runs/r1"},
 		{http.MethodPost, "/api/v1/runs/r1/resume"},
+		{http.MethodGet, "/api/v1/tools"},
+		{http.MethodPost, "/api/v1/tools/greeting/invoke"},
 	}
 	for _, c := range cases {
 		t.Run(c.method+" "+c.path, func(t *testing.T) {
@@ -253,5 +281,68 @@ func TestResumingAnUnknownRunIs404(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestListingTools(t *testing.T) {
+	f := &fakeRunner{toolSpecs: []tools.Spec{{Name: "greeting", Description: "greets someone"}}}
+	h := router(t, f, token)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, authed(httptest.NewRequest(http.MethodGet, "/api/v1/tools", nil)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	var out []tools.Spec
+	_ = json.NewDecoder(rec.Body).Decode(&out)
+	if len(out) != 1 || out[0].Name != "greeting" {
+		t.Errorf("got %v, want the one tool", out)
+	}
+}
+
+func TestInvokingAToolReturnsItsResult(t *testing.T) {
+	f := &fakeRunner{invokeResult: tools.Result{Label: "Salutation", Value: "Bonjour, Yoann !"}}
+	h := router(t, f, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"input":{"name":"Yoann"}}`
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/tools/greeting/invoke", bytes.NewReader([]byte(body))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	var out tools.Result
+	_ = json.NewDecoder(rec.Body).Decode(&out)
+	if out.Label != "Salutation" || out.Value != "Bonjour, Yoann !" {
+		t.Errorf("got %+v", out)
+	}
+	if len(f.invoked) != 1 || f.invoked[0].name != "greeting" || f.invoked[0].input["name"] != "Yoann" {
+		t.Errorf("InvokeTool called with %+v", f.invoked)
+	}
+}
+
+func TestInvokingAnUnknownToolIs404(t *testing.T) {
+	h := router(t, &fakeRunner{invokeUnknown: true}, token)
+
+	rec := httptest.NewRecorder()
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/tools/jamais/invoke", bytes.NewReader([]byte(`{}`))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+func TestInvokingAToolSurfacesAValidationFailure(t *testing.T) {
+	h := router(t, &fakeRunner{invokeErr: errors.New("missing required param \"name\"")}, token)
+
+	rec := httptest.NewRecorder()
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/tools/greeting/invoke", bytes.NewReader([]byte(`{}`))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body)
 	}
 }

@@ -9,15 +9,20 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 
 	"github.com/yoann/kern-orch/internal/checkpoint"
+	"github.com/yoann/kern-orch/internal/tools"
 )
 
 // ErrUnknownRun is returned by ResumeRun when no checkpoint exists for the given id, so the
 // router can answer 404 rather than guessing from an opaque error.
 var ErrUnknownRun = errors.New("daemon: unknown run")
+
+// ErrUnknownTool is returned by InvokeTool when no tool skill of that name is loaded.
+var ErrUnknownTool = errors.New("daemon: unknown tool")
 
 // Runner is what the daemon needs from the orchestration side. internal/cmd implements it,
 // using the same engine wiring the CLI's `run` and `resume` commands use — this package
@@ -35,6 +40,13 @@ type Runner interface {
 
 	ListRuns(ctx context.Context) ([]checkpoint.Summary, error)
 	GetRun(ctx context.Context, runID string) (checkpoint.Record, bool, error)
+
+	// ListTools returns every invocable tool skill's spec — an Espace widget's catalogue.
+	ListTools(ctx context.Context) ([]tools.Spec, error)
+
+	// InvokeTool runs the named tool with input and returns its display value. It returns
+	// ErrUnknownTool when no tool skill of that name is loaded.
+	InvokeTool(ctx context.Context, name string, input map[string]any) (tools.Result, error)
 }
 
 // NewRouter builds the daemon's HTTP handler. An empty token leaves every endpoint open,
@@ -49,6 +61,8 @@ func NewRouter(runner Runner, token string) http.Handler {
 	mux.HandleFunc("GET /api/v1/runs", s.auth(s.handleListRuns))
 	mux.HandleFunc("GET /api/v1/runs/{id}", s.auth(s.handleGetRun))
 	mux.HandleFunc("POST /api/v1/runs/{id}/resume", s.auth(s.handleResumeRun))
+	mux.HandleFunc("GET /api/v1/tools", s.auth(s.handleListTools))
+	mux.HandleFunc("POST /api/v1/tools/{name}/invoke", s.auth(s.handleInvokeTool))
 	return mux
 }
 
@@ -128,6 +142,37 @@ func (s *server) handleResumeRun(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
 		writeJSON(w, http.StatusAccepted, map[string]string{"status": "resuming"})
+	}
+}
+
+func (s *server) handleListTools(w http.ResponseWriter, r *http.Request) {
+	specs, err := s.runner.ListTools(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, specs)
+}
+
+func (s *server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Input map[string]any `json:"input"`
+	}
+	if r.Body != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+			writeError(w, http.StatusBadRequest, "malformed body: want {\"input\":{...}}")
+			return
+		}
+	}
+
+	result, err := s.runner.InvokeTool(r.Context(), r.PathValue("name"), body.Input)
+	switch {
+	case errors.Is(err, ErrUnknownTool):
+		writeError(w, http.StatusNotFound, "unknown tool")
+	case err != nil:
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeJSON(w, http.StatusOK, result)
 	}
 }
 

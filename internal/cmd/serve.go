@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -20,6 +21,8 @@ import (
 	"github.com/yoann/kern-orch/internal/daemon"
 	"github.com/yoann/kern-orch/internal/graph"
 	"github.com/yoann/kern-orch/internal/report"
+	"github.com/yoann/kern-orch/internal/skills"
+	"github.com/yoann/kern-orch/internal/tools"
 	"github.com/yoann/kern-orch/internal/topology"
 )
 
@@ -175,6 +178,51 @@ func (d *daemonRunner) ListRuns(ctx context.Context) ([]checkpoint.Summary, erro
 
 func (d *daemonRunner) GetRun(ctx context.Context, runID string) (checkpoint.Record, bool, error) {
 	return d.store.Latest(ctx, runID)
+}
+
+// ListTools returns every loaded skill invocable as a tool (type: tool, a declared
+// command). Skills are re-read on every call, same as list-skills and the registry
+// publisher — a directory, not a store with its own change notifications.
+func (d *daemonRunner) ListTools(ctx context.Context) ([]tools.Spec, error) {
+	reg, err := skills.Load(d.cfg.SkillsDir)
+	if err != nil {
+		return nil, err
+	}
+	var specs []tools.Spec
+	for _, sk := range reg.List() {
+		if sk.Type != skills.TypeTool || len(sk.Command) == 0 {
+			continue
+		}
+		specs = append(specs, toolSpec(sk))
+	}
+	return specs, nil
+}
+
+// InvokeTool runs the named tool skill's command and returns its display value. A name
+// that is not a loaded, command-backed tool skill is daemon.ErrUnknownTool — the router
+// maps that to 404 rather than a caller having to parse an error string.
+func (d *daemonRunner) InvokeTool(ctx context.Context, name string, input map[string]any) (tools.Result, error) {
+	reg, err := skills.Load(d.cfg.SkillsDir)
+	if err != nil {
+		return tools.Result{}, err
+	}
+	sk, ok := reg.Get(name)
+	if !ok || sk.Type != skills.TypeTool || len(sk.Command) == 0 {
+		return tools.Result{}, daemon.ErrUnknownTool
+	}
+	runner := &tools.Runner{Stderr: os.Stderr}
+	return runner.Invoke(ctx, sk, input)
+}
+
+// toolSpec translates a skills.Skill into the narrower shape a tool caller needs — the
+// same edge-translation reasoning as kern-notify's kernui.Run: a caller asking what a tool
+// needs should not also learn the skill catalogue's own internal shape.
+func toolSpec(sk skills.Skill) tools.Spec {
+	params := make([]tools.Param, len(sk.Params))
+	for i, p := range sk.Params {
+		params[i] = tools.Param{Name: p.Name, Type: p.Type, Required: p.Required}
+	}
+	return tools.Spec{Name: sk.Name, Description: sk.Description, Params: params}
 }
 
 const shutdownGrace = 10 * time.Second
