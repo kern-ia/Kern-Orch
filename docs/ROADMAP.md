@@ -161,6 +161,16 @@ Rôle : validation **bloquante** en ligne entre Orchestration et données (sché
 - [ ] Garde-fous runtime sur le state/sorties (schémas, contraintes métier), bloquants **M**
 - Dépendances : EPIC-01.
 
+**Scope étendu, décidé le 2026-07-29, pas encore cadré** : le modèle « cercle de Willis »
+(`../cercle_de_willis.md`, à la racine de l'espace de travail) — score de tension par agent,
+détection de dérive sémantique, shunt automatique vers un agent de secours, isolation
+(« clamping ») d'un agent qui dérive — appartient ici, pas à kern-pilot (EPIC-05). Raison :
+c'est une boucle interne à l'exécution du graphe (réflexe, sans aller-retour externe),
+alors que kern-pilot est un chemin d'écriture externe authentifié (un humain, plus tard
+peut-être un agent autorisé). Les deux partagent une primitive au niveau du moteur
+(« isoler/rerouter un nœud »), déclenchée soit automatiquement ici, soit depuis l'extérieur
+via C6 — à concevoir comme un chantier à part, après C6.
+
 ### 🔌 EPIC-08 · kern-anon (PII/Presidio) — *brique externe faite, intégration à faire*
 Rôle : pseudonymisation par ID avant l'appel LLM ; ré-hydratation au retour. Brique `kern-*`
 autonome et agnostique — kern-orch ne fait que la câbler par contrat.
