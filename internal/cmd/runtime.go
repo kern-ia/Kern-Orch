@@ -13,6 +13,7 @@ import (
 	"github.com/yoann/kern-orch/internal/checkpoint"
 	"github.com/yoann/kern-orch/internal/config"
 	"github.com/yoann/kern-orch/internal/graph"
+	"github.com/yoann/kern-orch/internal/notify"
 	"github.com/yoann/kern-orch/internal/report"
 	"github.com/yoann/kern-orch/internal/skills"
 	"github.com/yoann/kern-orch/internal/topology"
@@ -48,7 +49,7 @@ func newRunner(cfg config.Config, activity *activityRelay) graph.AgentRunner {
 
 // builtinRegistry wires the built-in tool/router functions available to every graph.
 // Projects extend this set in Go; the YAML topology references entries by name.
-func builtinRegistry(runner graph.AgentRunner) *topology.Registry {
+func builtinRegistry(runner graph.AgentRunner, cfg config.Config) *topology.Registry {
 	reg := topology.NewRegistry(runner)
 	reg.Tool("noop", func(context.Context, *graph.State) error { return nil })
 	// double: demo tool for the subgraph example — multiplies state key "n" by 2.
@@ -71,6 +72,20 @@ func builtinRegistry(runner graph.AgentRunner) *topology.Registry {
 		s.Freeze(nil)
 		return nil
 	})
+	// announce: demo tool for the notify example — sets state key "message" to a fixed
+	// demo string, standing in for what an agent's own output would set.
+	reg.Tool("announce", func(_ context.Context, s *graph.State) error {
+		s.Set("message", "Test kern-orch : le nœud notify a bien envoyé ce message.")
+		return nil
+	})
+	// notify: an agent's own outbound channel to a human — sends state key "message" to
+	// Telegram. Unconfigured (no KERN_TELEGRAM_BOT_TOKEN/KERN_TELEGRAM_CHAT_ID) fails
+	// the node rather than dropping the message silently.
+	var notifyClient *notify.Client
+	if cfg.TelegramBotToken != "" && cfg.TelegramChatID != "" {
+		notifyClient = notify.New(cfg.TelegramBotToken, cfg.TelegramChatID)
+	}
+	reg.Tool("notify", notify.Tool(notifyClient))
 	return reg
 }
 

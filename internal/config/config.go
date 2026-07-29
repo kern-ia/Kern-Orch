@@ -35,6 +35,14 @@ const (
 	// rule kern-ui enforces on its own API, re-derived here rather than shared: the two
 	// bricks depend on nothing of each other's.
 	EnvServeToken = "KERN_ORCH_TOKEN"
+
+	// EnvTelegramBotToken and EnvTelegramChatID configure the `notify` builtin tool: an
+	// agent node's own outbound channel to a human, distinct from the step/activity/
+	// registry sinks above (those are the harness reporting on itself; this is a graph
+	// choosing to speak). Either unset leaves the tool unconfigured, and a graph that
+	// references it fails loud rather than dropping messages silently.
+	EnvTelegramBotToken = "KERN_TELEGRAM_BOT_TOKEN"
+	EnvTelegramChatID   = "KERN_TELEGRAM_CHAT_ID"
 )
 
 // Config is the resolved runtime configuration.
@@ -55,6 +63,11 @@ type Config struct {
 	ServeAddr string
 	// ServeToken is the credential the daemon API requires; empty => open (local dev only).
 	ServeToken string
+
+	// TelegramBotToken and TelegramChatID configure the `notify` builtin tool; either
+	// empty leaves it unconfigured.
+	TelegramBotToken string
+	TelegramChatID   string
 }
 
 // FromEnv builds a Config from the environment, applying defaults for unset variables.
@@ -69,6 +82,8 @@ func FromEnv() Config {
 		SinkToken:         os.Getenv(EnvSinkToken),
 		ServeAddr:         envOr(EnvServeAddr, "127.0.0.1:7070"),
 		ServeToken:        os.Getenv(EnvServeToken),
+		TelegramBotToken:  os.Getenv(EnvTelegramBotToken),
+		TelegramChatID:    os.Getenv(EnvTelegramChatID),
 	}
 }
 
