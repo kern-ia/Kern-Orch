@@ -1,0 +1,17 @@
+# Demonstrates C6's steering channel: an approval node blocks until a human decides,
+# then routes down whichever branch the decision picked.
+# Run with: kern-orch serve, then POST /api/v1/runs, then
+#   POST /api/v1/runs/{id}/nodes/confirm/decide {"decision":"approve"}
+entry: confirm
+nodes:
+  - id: confirm
+    type: approval
+  - id: approved
+    type: tool
+    func: announce
+  - id: refused
+    type: tool
+    func: noop
+edges:
+  - from: confirm
+    router: onConfirmDecision

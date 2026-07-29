@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/yoann/kern-orch/internal/agentrunner"
 	"github.com/yoann/kern-orch/internal/checkpoint"
@@ -16,6 +17,7 @@ import (
 	"github.com/yoann/kern-orch/internal/notify"
 	"github.com/yoann/kern-orch/internal/report"
 	"github.com/yoann/kern-orch/internal/skills"
+	"github.com/yoann/kern-orch/internal/steer"
 	"github.com/yoann/kern-orch/internal/topology"
 )
 
@@ -86,6 +88,30 @@ func builtinRegistry(runner graph.AgentRunner, cfg config.Config) *topology.Regi
 		notifyClient = notify.New(cfg.TelegramBotToken, cfg.TelegramChatID)
 	}
 	reg.Tool("notify", notify.Tool(notifyClient))
+	// wait: demo tool for C6 — blocks until the run's own context is cancelled, proving
+	// stop actually interrupts a live node rather than just refusing new work.
+	reg.Tool("wait", func(ctx context.Context, _ *graph.State) error {
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	// pause: demo tool for C6 — sleeps briefly so a nudge sent while it runs has time to
+	// land before the next level starts.
+	reg.Tool("pause", func(ctx context.Context, _ *graph.State) error {
+		select {
+		case <-time.After(150 * time.Millisecond):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	// onConfirmDecision: demo router for the C6 approval example — reads the decision an
+	// approval node named "confirm" recorded and picks the matching branch.
+	reg.Router("onConfirmDecision", func(s *graph.State) []string {
+		if v, _ := s.Get(graph.DecisionKey("confirm")); v == string(graph.Approved) {
+			return []string{"approved"}
+		}
+		return []string{"refused"}
+	})
 	return reg
 }
 
@@ -100,8 +126,9 @@ func openStore(cfg config.Config) (*checkpoint.SQLiteStore, error) {
 }
 
 // checkpointHook persists the state after each level under runID, recording graphPath
-// so `resume` can reload the graph without the caller re-supplying it.
-func checkpointHook(store *checkpoint.SQLiteStore, runID, graphPath string) graph.StepFunc {
+// so `resume` can reload the graph without the caller re-supplying it, and requester so
+// C6's write path knows who may steer this run (empty means anyone may).
+func checkpointHook(store *checkpoint.SQLiteStore, runID, graphPath, requester string) graph.StepFunc {
 	return func(ctx context.Context, info graph.StepInfo, s *graph.State) error {
 		status := checkpoint.StatusRunning
 		if len(info.Frontier) == 0 {
@@ -109,7 +136,7 @@ func checkpointHook(store *checkpoint.SQLiteStore, runID, graphPath string) grap
 		}
 		return store.Save(ctx, checkpoint.Record{
 			RunID: runID, Step: info.Step, Frontier: info.Frontier, State: s,
-			Status: status, GraphPath: graphPath,
+			Status: status, GraphPath: graphPath, Requester: requester,
 		})
 	}
 }
@@ -221,4 +248,15 @@ func nestedRuns(reg *topology.Registry, reporter *report.HTTPReporter, parentRun
 		return reporter.NestedHook(newRunID(), graphName(graphRef), describeTopology(graphRef),
 			&report.Parent{RunID: parentRun, NodeID: nodeID})
 	})
+}
+
+// wireApproval binds a run's mailbox as the decision source for every approval node in
+// its graph. A nil mailbox — the bare CLI's `run`/`resume`, which has no live steer
+// surface — leaves approval nodes unconfigured, and the loader refuses to build such a
+// graph rather than let it hang forever with nothing to answer it.
+func wireApproval(reg *topology.Registry, mailbox *steer.Mailbox) {
+	if mailbox == nil {
+		return
+	}
+	reg.OnApproval(mailbox.AwaitDecision)
 }

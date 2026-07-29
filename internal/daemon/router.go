@@ -24,6 +24,15 @@ var ErrUnknownRun = errors.New("daemon: unknown run")
 // ErrUnknownTool is returned by InvokeTool when no tool skill of that name is loaded.
 var ErrUnknownTool = errors.New("daemon: unknown tool")
 
+// ErrForbidden is returned by StopRun, Nudge and Decide when the caller's actor does not
+// match the run's own requester — C6's write path is the one place on this surface where
+// who is asking matters, not just what they ask.
+var ErrForbidden = errors.New("daemon: not this run's requester")
+
+// ErrUnknownNode is returned by Decide when no node of that id is currently awaiting a
+// decision on the given run — either it never paused there, or it already got one.
+var ErrUnknownNode = errors.New("daemon: unknown node")
+
 // Runner is what the daemon needs from the orchestration side. internal/cmd implements it,
 // using the same engine wiring the CLI's `run` and `resume` commands use — this package
 // never touches graph, report or checkpoint construction directly.
@@ -31,8 +40,8 @@ type Runner interface {
 	// StartRun launches graphPath and returns its run id immediately. An error here is
 	// synchronous and means the run never started at all — a bad path, a graph that fails
 	// to load — so a caller learns about it rather than polling for a run that will never
-	// appear.
-	StartRun(ctx context.Context, graphPath string) (runID string, err error)
+	// appear. requester names who asked; empty leaves the run open to any actor.
+	StartRun(ctx context.Context, graphPath, requester string) (runID string, err error)
 
 	// ResumeRun continues runID from its last checkpoint in the background. It returns
 	// ErrUnknownRun when no checkpoint exists.
@@ -40,6 +49,18 @@ type Runner interface {
 
 	ListRuns(ctx context.Context) ([]checkpoint.Summary, error)
 	GetRun(ctx context.Context, runID string) (checkpoint.Record, bool, error)
+
+	// StopRun cancels a live run. ErrUnknownRun if it never existed, ErrForbidden if actor
+	// is not the run's requester.
+	StopRun(ctx context.Context, runID, actor string) error
+
+	// Nudge queues a state key/value for the next level of a live run to pick up. Same
+	// error shape as StopRun.
+	Nudge(ctx context.Context, runID, actor, key string, value any) error
+
+	// Decide answers a pending approval node. ErrUnknownNode if no node of that id is
+	// currently waiting on this run.
+	Decide(ctx context.Context, runID, nodeID, actor, decision string) error
 
 	// ListTools returns every invocable tool skill's spec — an Espace widget's catalogue.
 	ListTools(ctx context.Context) ([]tools.Spec, error)
@@ -63,6 +84,9 @@ func NewRouter(runner Runner, token string) http.Handler {
 	mux.HandleFunc("POST /api/v1/runs/{id}/resume", s.auth(s.handleResumeRun))
 	mux.HandleFunc("GET /api/v1/tools", s.auth(s.handleListTools))
 	mux.HandleFunc("POST /api/v1/tools/{name}/invoke", s.auth(s.handleInvokeTool))
+	mux.HandleFunc("POST /api/v1/runs/{id}/stop", s.auth(s.handleStopRun))
+	mux.HandleFunc("POST /api/v1/runs/{id}/nudge", s.auth(s.handleNudge))
+	mux.HandleFunc("POST /api/v1/runs/{id}/nodes/{node}/decide", s.auth(s.handleDecide))
 	return mux
 }
 
@@ -92,7 +116,8 @@ func handleHealthz(w http.ResponseWriter, _ *http.Request) {
 
 func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Graph string `json:"graph"`
+		Graph     string `json:"graph"`
+		Requester string `json:"requester"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "malformed body: want {\"graph\":\"<path>\"}")
@@ -103,7 +128,7 @@ func (s *server) handleStartRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	runID, err := s.runner.StartRun(r.Context(), body.Graph)
+	runID, err := s.runner.StartRun(r.Context(), body.Graph, body.Requester)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -158,11 +183,9 @@ func (s *server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Input map[string]any `json:"input"`
 	}
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
-			writeError(w, http.StatusBadRequest, "malformed body: want {\"input\":{...}}")
-			return
-		}
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed body: want {\"input\":{...}}")
+		return
 	}
 
 	result, err := s.runner.InvokeTool(r.Context(), r.PathValue("name"), body.Input)
@@ -174,6 +197,92 @@ func (s *server) handleInvokeTool(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, http.StatusOK, result)
 	}
+}
+
+func (s *server) handleStopRun(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Actor string `json:"actor"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed body: want {\"actor\":\"...\"}")
+		return
+	}
+
+	err := s.runner.StopRun(r.Context(), r.PathValue("id"), body.Actor)
+	switch {
+	case errors.Is(err, ErrUnknownRun):
+		writeError(w, http.StatusNotFound, "unknown run")
+	case errors.Is(err, ErrForbidden):
+		writeError(w, http.StatusForbidden, "not this run's requester")
+	case err != nil:
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "stopping"})
+	}
+}
+
+func (s *server) handleNudge(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Actor string `json:"actor"`
+		Key   string `json:"key"`
+		Value any    `json:"value"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed body: want {\"key\":\"...\",\"value\":...}")
+		return
+	}
+	if strings.TrimSpace(body.Key) == "" {
+		writeError(w, http.StatusBadRequest, "key is required")
+		return
+	}
+
+	err := s.runner.Nudge(r.Context(), r.PathValue("id"), body.Actor, body.Key, body.Value)
+	switch {
+	case errors.Is(err, ErrUnknownRun):
+		writeError(w, http.StatusNotFound, "unknown run")
+	case errors.Is(err, ErrForbidden):
+		writeError(w, http.StatusForbidden, "not this run's requester")
+	case err != nil:
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "queued"})
+	}
+}
+
+func (s *server) handleDecide(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Actor    string `json:"actor"`
+		Decision string `json:"decision"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed body: want {\"decision\":\"approve|refuse\"}")
+		return
+	}
+
+	err := s.runner.Decide(r.Context(), r.PathValue("id"), r.PathValue("node"), body.Actor, body.Decision)
+	switch {
+	case errors.Is(err, ErrUnknownRun), errors.Is(err, ErrUnknownNode):
+		writeError(w, http.StatusNotFound, "unknown run or node")
+	case errors.Is(err, ErrForbidden):
+		writeError(w, http.StatusForbidden, "not this run's requester")
+	case err != nil:
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeJSON(w, http.StatusOK, map[string]string{"status": "decided"})
+	}
+}
+
+// decodeBody decodes r's JSON body into v. A missing body is fine — v keeps its zero
+// value, the same shape every steer endpoint already treats as "no actor given" or
+// "empty run" — only a genuinely malformed body is an error.
+func decodeBody(r *http.Request, v any) error {
+	if r.Body == nil {
+		return nil
+	}
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
