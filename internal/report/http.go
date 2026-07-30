@@ -112,6 +112,10 @@ type StepEvent struct {
 
 	// Parent is set on a nested run and absent on a top-level one.
 	Parent *Parent `json:"parent,omitempty"`
+
+	// Requester names who asked for this run (C6); empty means open. Rides on the first
+	// event only, like Topology.
+	Requester string `json:"requester,omitempty"`
 }
 
 // flatten extracts the business data of a state, leaving its internals behind.
@@ -140,6 +144,11 @@ type HTTPReporter struct {
 	Token   string // presented as a bearer credential; empty sends no header
 	Timeout time.Duration
 	Client  *http.Client
+
+	// Requester names who asked for this run (C6); empty means open, no different from a
+	// run with no requester at all. Rides on the first event only, the same way Topology
+	// does, and for the same reason: it never changes over a run's life.
+	Requester string
 
 	// FlushTimeout caps how long Flush waits. Defaults to DefaultFlushTimeout.
 	FlushTimeout time.Duration
@@ -210,6 +219,7 @@ func (r *HTTPReporter) NestedHook(runID, graphName string, topo *Topology, paren
 		}
 		if !run.sent {
 			ev.Topology = run.pending
+			ev.Requester = r.Requester
 			run.sent = true
 		}
 
