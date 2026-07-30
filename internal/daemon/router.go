@@ -9,6 +9,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -32,6 +33,25 @@ var ErrForbidden = errors.New("daemon: not this run's requester")
 // ErrUnknownNode is returned by Decide when no node of that id is currently awaiting a
 // decision on the given run — either it never paused there, or it already got one.
 var ErrUnknownNode = errors.New("daemon: unknown node")
+
+// UnknownSkillError is returned by Dispatch when no skill of that name is loaded. It
+// carries the names that do exist, so a caller who mistyped a command sees what is real
+// rather than a bare "not found".
+type UnknownSkillError struct {
+	Known []string
+}
+
+func (e *UnknownSkillError) Error() string {
+	return fmt.Sprintf("unknown skill (known: %s)", strings.Join(e.Known, ", "))
+}
+
+// DispatchResult is what Dispatch answers with: a tool's rendered value if the skill is a
+// tool, or the id of the run it just launched if the skill is an agent. Never both.
+type DispatchResult struct {
+	Kind   string        `json:"kind"` // "tool" | "run"
+	Result *tools.Result `json:"result,omitempty"`
+	RunID  string        `json:"run_id,omitempty"`
+}
 
 // Runner is what the daemon needs from the orchestration side. internal/cmd implements it,
 // using the same engine wiring the CLI's `run` and `resume` commands use — this package
@@ -68,6 +88,11 @@ type Runner interface {
 	// InvokeTool runs the named tool with input and returns its display value. It returns
 	// ErrUnknownTool when no tool skill of that name is loaded.
 	InvokeTool(ctx context.Context, name string, input map[string]any) (tools.Result, error)
+
+	// Dispatch resolves an explicit `/skill text…` chat command: a tool skill is invoked
+	// directly, an agent skill launches a new one-node run. Returns *UnknownSkillError
+	// when no skill of that name is loaded.
+	Dispatch(ctx context.Context, skill, text, requester string) (DispatchResult, error)
 }
 
 // NewRouter builds the daemon's HTTP handler. An empty token leaves every endpoint open,
@@ -87,6 +112,7 @@ func NewRouter(runner Runner, token string) http.Handler {
 	mux.HandleFunc("POST /api/v1/runs/{id}/stop", s.auth(s.handleStopRun))
 	mux.HandleFunc("POST /api/v1/runs/{id}/nudge", s.auth(s.handleNudge))
 	mux.HandleFunc("POST /api/v1/runs/{id}/nodes/{node}/decide", s.auth(s.handleDecide))
+	mux.HandleFunc("POST /api/v1/dispatch", s.auth(s.handleDispatch))
 	return mux
 }
 
@@ -269,6 +295,36 @@ func (s *server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 	default:
 		writeJSON(w, http.StatusOK, map[string]string{"status": "decided"})
+	}
+}
+
+func (s *server) handleDispatch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Skill     string `json:"skill"`
+		Text      string `json:"text"`
+		Requester string `json:"requester"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "malformed body: want {\"skill\":\"...\",\"text\":\"...\"}")
+		return
+	}
+	if strings.TrimSpace(body.Skill) == "" {
+		writeError(w, http.StatusBadRequest, "skill is required")
+		return
+	}
+
+	result, err := s.runner.Dispatch(r.Context(), body.Skill, body.Text, body.Requester)
+	var unknown *UnknownSkillError
+	switch {
+	case errors.As(err, &unknown):
+		writeJSON(w, http.StatusNotFound, map[string]any{
+			"error": unknown.Error(),
+			"known": unknown.Known,
+		})
+	case err != nil:
+		writeError(w, http.StatusBadRequest, err.Error())
+	default:
+		writeJSON(w, http.StatusOK, result)
 	}
 }
 

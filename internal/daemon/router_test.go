@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/yoann/kern-orch/internal/checkpoint"
@@ -54,6 +55,11 @@ type fakeRunner struct {
 	decideUnknown   bool
 	decideForbidden bool
 	decideErr       error
+
+	dispatched           []dispatchCall
+	dispatchUnknownSkill *UnknownSkillError
+	dispatchResult       DispatchResult
+	dispatchErr          error
 }
 
 type invocation struct {
@@ -69,6 +75,8 @@ type nudgeCall struct {
 }
 
 type decideCall struct{ runID, nodeID, actor, decision string }
+
+type dispatchCall struct{ skill, text, requester string }
 
 func (f *fakeRunner) StartRun(_ context.Context, graphPath, requester string) (string, error) {
 	f.started = append(f.started, graphPath)
@@ -113,6 +121,17 @@ func (f *fakeRunner) Decide(_ context.Context, runID, nodeID, actor, decision st
 	default:
 		return f.decideErr
 	}
+}
+
+func (f *fakeRunner) Dispatch(_ context.Context, skill, text, requester string) (DispatchResult, error) {
+	f.dispatched = append(f.dispatched, dispatchCall{skill, text, requester})
+	if f.dispatchUnknownSkill != nil {
+		return DispatchResult{}, f.dispatchUnknownSkill
+	}
+	if f.dispatchErr != nil {
+		return DispatchResult{}, f.dispatchErr
+	}
+	return f.dispatchResult, nil
 }
 
 func (f *fakeRunner) ResumeRun(_ context.Context, runID string) error {
@@ -180,6 +199,7 @@ func TestEveryOtherEndpointRefusesAnAnonymousCaller(t *testing.T) {
 		{http.MethodPost, "/api/v1/runs/r1/stop"},
 		{http.MethodPost, "/api/v1/runs/r1/nudge"},
 		{http.MethodPost, "/api/v1/runs/r1/nodes/confirm/decide"},
+		{http.MethodPost, "/api/v1/dispatch"},
 	}
 	for _, c := range cases {
 		t.Run(c.method+" "+c.path, func(t *testing.T) {
@@ -590,6 +610,89 @@ func TestDecidingSurfacesAnInvalidDecisionValue(t *testing.T) {
 	rec := httptest.NewRecorder()
 	body := `{"decision":"maybe"}`
 	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/runs/r1/nodes/confirm/decide", bytes.NewReader([]byte(body))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400: %s", rec.Code, rec.Body)
+	}
+}
+
+func TestDispatchingATool(t *testing.T) {
+	f := &fakeRunner{dispatchResult: DispatchResult{Kind: "tool", Result: &tools.Result{Label: "Battement", Value: "17:09:11"}}}
+	h := router(t, f, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"skill":"heartbeat","text":""}`
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/dispatch", bytes.NewReader([]byte(body))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	var out DispatchResult
+	_ = json.NewDecoder(rec.Body).Decode(&out)
+	if out.Kind != "tool" || out.Result == nil || out.Result.Value != "17:09:11" {
+		t.Errorf("got %+v", out)
+	}
+	if len(f.dispatched) != 1 || f.dispatched[0].skill != "heartbeat" {
+		t.Errorf("Dispatch called with %+v", f.dispatched)
+	}
+}
+
+func TestDispatchingAnAgentSkillReturnsARunID(t *testing.T) {
+	f := &fakeRunner{dispatchResult: DispatchResult{Kind: "run", RunID: "abc123"}}
+	h := router(t, f, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"skill":"planner","text":"analyse ceci"}`
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/dispatch", bytes.NewReader([]byte(body))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body)
+	}
+	var out DispatchResult
+	_ = json.NewDecoder(rec.Body).Decode(&out)
+	if out.Kind != "run" || out.RunID != "abc123" {
+		t.Errorf("got %+v", out)
+	}
+}
+
+func TestDispatchingAnUnknownSkillIs404WithTheKnownNames(t *testing.T) {
+	f := &fakeRunner{dispatchUnknownSkill: &UnknownSkillError{Known: []string{"heartbeat", "planner"}}}
+	h := router(t, f, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"skill":"jamais","text":""}`
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/dispatch", bytes.NewReader([]byte(body))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "heartbeat") || !strings.Contains(rec.Body.String(), "planner") {
+		t.Errorf("body = %s, want the known skill names", rec.Body.String())
+	}
+}
+
+func TestDispatchingRejectsAnEmptySkillName(t *testing.T) {
+	h := router(t, &fakeRunner{}, token)
+
+	rec := httptest.NewRecorder()
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/dispatch", bytes.NewReader([]byte(`{"skill":""}`))))
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestDispatchingSurfacesAValidationFailure(t *testing.T) {
+	h := router(t, &fakeRunner{dispatchErr: errors.New(`skill "greeting" needs several values, not yet usable from the chat`)}, token)
+
+	rec := httptest.NewRecorder()
+	body := `{"skill":"greeting","text":"x"}`
+	req := authed(httptest.NewRequest(http.MethodPost, "/api/v1/dispatch", bytes.NewReader([]byte(body))))
 	h.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
