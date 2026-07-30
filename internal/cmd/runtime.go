@@ -254,9 +254,20 @@ func nestedRuns(reg *topology.Registry, reporter *report.HTTPReporter, parentRun
 // its graph. A nil mailbox — the bare CLI's `run`/`resume`, which has no live steer
 // surface — leaves approval nodes unconfigured, and the loader refuses to build such a
 // graph rather than let it hang forever with nothing to answer it.
-func wireApproval(reg *topology.Registry, mailbox *steer.Mailbox) {
+//
+// The wait is bracketed through the same activity relay an agent node already uses
+// (report.ActivityReporter, C10): without it, a run parked on an approval node reports
+// nothing at all until a level completes — which never happens until someone decides it —
+// so kern-ui would have no way to show a human the very decision they are meant to make.
+// A pending approval is exactly the kind of "something is happening" the beacon already
+// knows how to say.
+func wireApproval(reg *topology.Registry, mailbox *steer.Mailbox, activity *activityRelay) {
 	if mailbox == nil {
 		return
 	}
-	reg.OnApproval(mailbox.AwaitDecision)
+	reg.OnApproval(func(ctx context.Context, nodeID string) (graph.Decision, error) {
+		activity.call(nodeID, true)
+		defer activity.call(nodeID, false)
+		return mailbox.AwaitDecision(ctx, nodeID)
+	})
 }

@@ -58,7 +58,7 @@ func prepareRun(cfg config.Config, runID, graphPath, requester string, mailbox *
 	// construction time.
 	reg := builtinRegistry(newRunner(cfg, activity), cfg)
 	nestedRuns(reg, reporter, runID)
-	wireApproval(reg, mailbox)
+	wireApproval(reg, mailbox, activity)
 
 	g, err := topology.LoadFile(graphPath, reg)
 	if err != nil {
