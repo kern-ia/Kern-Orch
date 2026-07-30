@@ -338,6 +338,131 @@ func parseDecision(s string) (graph.Decision, error) {
 	}
 }
 
+// Dispatch resolves an explicit `/skill text…` chat command (C6). A tool skill delegates
+// straight to the same invocation C5 already built; an agent skill launches a new
+// one-node run whose whole prompt is text — no template, nothing to configure, matching
+// what a skill actually carries today.
+func (d *daemonRunner) Dispatch(ctx context.Context, skillName, text, requester string) (daemon.DispatchResult, error) {
+	reg, err := skills.Load(d.cfg.SkillsDir)
+	if err != nil {
+		return daemon.DispatchResult{}, err
+	}
+	sk, ok := reg.Get(skillName)
+	if !ok {
+		return daemon.DispatchResult{}, &daemon.UnknownSkillError{Known: skillNames(reg)}
+	}
+
+	switch sk.Type {
+	case skills.TypeTool:
+		if len(sk.Command) == 0 {
+			return daemon.DispatchResult{}, &daemon.UnknownSkillError{Known: skillNames(reg)}
+		}
+		input, err := dispatchInput(sk, text)
+		if err != nil {
+			return daemon.DispatchResult{}, err
+		}
+		runner := &tools.Runner{Stderr: os.Stderr}
+		result, err := runner.Invoke(ctx, sk, input)
+		if err != nil {
+			return daemon.DispatchResult{}, err
+		}
+		return daemon.DispatchResult{Kind: "tool", Result: &result}, nil
+
+	case skills.TypeAgent:
+		runID := newRunID()
+		runCtx, cancel := context.WithCancel(context.Background())
+		mailbox := d.registerMailbox(runID, cancel)
+
+		prepared, err := prepareAdhocRun(d.cfg, runID, skillName, text, requester, mailbox)
+		if err != nil {
+			cancel()
+			d.unregisterMailbox(runID)
+			return daemon.DispatchResult{}, err
+		}
+		if err := d.store.Save(ctx, checkpoint.Record{
+			RunID: runID, Step: checkpoint.QueuedStep, State: graph.NewState(),
+			Status: checkpoint.StatusQueued, Requester: requester,
+		}); err != nil {
+			cancel()
+			d.unregisterMailbox(runID)
+			return daemon.DispatchResult{}, err
+		}
+
+		go func() {
+			defer d.unregisterMailbox(runID)
+			if err := prepared.run(runCtx, d.store, runID, nil); err != nil {
+				slog.Error("kern-orch: dispatched run failed", "run_id", runID, "error", err)
+				return
+			}
+			slog.Info("kern-orch: dispatched run completed", "run_id", runID)
+		}()
+		return daemon.DispatchResult{Kind: "run", RunID: runID}, nil
+
+	default:
+		return daemon.DispatchResult{}, fmt.Errorf("dispatch: skill %q has unsupported type %q", skillName, sk.Type)
+	}
+}
+
+// dispatchInput maps free text onto a tool skill's declared params for chat dispatch: no
+// required param means text is ignored, exactly one means text is its whole value, more
+// than one has no way to split unambiguously — refused rather than guessed at.
+func dispatchInput(sk skills.Skill, text string) (map[string]any, error) {
+	var only skills.Param
+	required := 0
+	for _, p := range sk.Params {
+		if p.Required {
+			required++
+			only = p
+		}
+	}
+	switch required {
+	case 0:
+		return nil, nil
+	case 1:
+		return map[string]any{only.Name: text}, nil
+	default:
+		return nil, fmt.Errorf("dispatch: skill %q needs several values, not yet usable from the chat", sk.Name)
+	}
+}
+
+// skillNames lists every loaded skill's name, sorted (List already sorts) — what an
+// unknown-skill error shows so a mistyped command reveals what is real.
+func skillNames(reg *skills.Registry) []string {
+	list := reg.List()
+	names := make([]string, len(list))
+	for i, sk := range list {
+		names[i] = sk.Name
+	}
+	return names
+}
+
+// prepareAdhocRun builds a one-node graph for a single agent skill dispatched from chat —
+// no YAML file, no template: text is the whole prompt. It shares every other seam with a
+// file-loaded run (same runner construction, same reporter/activity wiring); only how the
+// graph itself is built differs.
+func prepareAdhocRun(cfg config.Config, runID, skillName, prompt, requester string, mailbox *steer.Mailbox) (*preparedRun, error) {
+	activity := &activityRelay{}
+	reporter := report.NewHTTP(cfg.StepReportURL)
+	reporter.Token = cfg.SinkToken
+	runner := newRunner(cfg, activity)
+
+	g := graph.NewGraph().SetEntry(skillName).AddNode(graph.NewAgentNode(skillName, prompt, runner))
+	if err := g.Validate(); err != nil {
+		return nil, err
+	}
+
+	activityReporter := report.NewActivityReporter(cfg.ActivityReportURL)
+	activityReporter.Token = cfg.SinkToken
+	activity.fn = func(nodeID string, generating bool) {
+		activityReporter.Report(context.Background(), runID, skillName, nodeID, generating)
+	}
+
+	return &preparedRun{
+		graph: g, graphPath: "", name: skillName, requester: requester, mailbox: mailbox,
+		reporter: reporter, activity: activity, activityReporter: activityReporter,
+	}, nil
+}
+
 // ListTools returns every loaded skill invocable as a tool (type: tool, a declared
 // command). Skills are re-read on every call, same as list-skills and the registry
 // publisher — a directory, not a store with its own change notifications.
