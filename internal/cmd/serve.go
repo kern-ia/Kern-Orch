@@ -52,6 +52,7 @@ func prepareRun(cfg config.Config, runID, graphPath, requester string, mailbox *
 	activity := &activityRelay{}
 	reporter := report.NewHTTP(cfg.StepReportURL)
 	reporter.Token = cfg.SinkToken
+	reporter.Requester = requester
 
 	// Wired before the graph is built, not after: a subgraph node receives its hook at
 	// construction time.
@@ -444,6 +445,7 @@ func prepareAdhocRun(cfg config.Config, runID, skillName, prompt, requester stri
 	activity := &activityRelay{}
 	reporter := report.NewHTTP(cfg.StepReportURL)
 	reporter.Token = cfg.SinkToken
+	reporter.Requester = requester
 	runner := newRunner(cfg, activity)
 
 	g := graph.NewGraph().SetEntry(skillName).AddNode(graph.NewAgentNode(skillName, prompt, runner))
