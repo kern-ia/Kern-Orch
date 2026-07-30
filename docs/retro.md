@@ -216,3 +216,15 @@ Les pièges génériques (réutilisables hors projet) remontent aussi dans le sk
   repris après un redémarrage) renvoient tous la même erreur générique 400. Pas encore un
   statut HTTP dédié — acceptable pour une V1, à revisiter si un client a besoin de distinguer
   les cas.
+- **Trouvé en vérifiant dans un vrai navigateur** : un run parké sur un nœud approval ne
+  rapportait RIEN tant qu'aucun niveau n'était terminé — et un niveau où l'approval est le
+  nœud d'entrée ne se termine jamais avant la décision. kern-ui n'avait donc aucun moyen de
+  montrer la décision en attente. Corrigé en réutilisant le signal d'activité (C10) pendant
+  l'attente — mais ça ne résout que la moitié : la TOPOLOGIE (donc l'identification du nœud
+  comme `approval`) ne voyage toujours que sur le premier step event, qui n'arrive toujours
+  pas tant que rien n'a été décidé si l'approval est le nœud d'entrée. `examples/steer.yaml`
+  a été réordonné (un nœud avant l'approval) plutôt que de complexifier le protocole — ça
+  correspond de toute façon à la forme réelle la plus probable (un agent décide quelque
+  chose, puis un humain le confirme). **Restriction connue et non résolue** : un graphe où
+  l'approval est littéralement le premier nœud n'a aujourd'hui aucun chemin d'interface pour
+  être décidé — seul l'API directe le peut.
