@@ -25,7 +25,7 @@ La famille (noms) :
 | **kern-pilot** | canal de pilotage (steer · queue · replan · nudge) | ⬜ |
 | **kern-policy** | policies & permissions (règles · budgets · escalade) | ⬜ |
 | **kern-guard** | garde-fou structurel (inline · bloquant) | ⬜ |
-| **kern-exec** | exécution terminal / sandbox | ⬜ |
+| **kern-exec** | exécution terminal / sandbox | 🟡 *(macOS + Linux faits, Windows refuse explicitement ; réseau encore tout-ou-rien)* |
 | **kern-scorer** | scorer sémantique (async · score / alerte) | ⬜ |
 | **kern-vault** | credentials vault | 🔌 externe |
 
@@ -55,7 +55,7 @@ flowchart TB
     ORCH["kern-orch (ce repo)<br/>orchestration · tâches courtes · zones de contexte<br/>gel = respawn contexte frais<br/>✅ EPIC-01 clos · v0.3.0"]:::done
     SKILLS["kern-skills<br/>registre des skills<br/>✅ fait"]:::done
     TOOLS["kern-tools<br/>bibliothèque de tools<br/>🟡 partiel"]:::partial
-    EXEC["kern-exec<br/>exécution terminal / sandbox<br/>⬜ à faire"]:::todo
+    EXEC["kern-exec<br/>exécution terminal / sandbox<br/>🟡 macOS + Linux faits"]:::partial
     POL["kern-policy<br/>règles · budgets · escalade<br/>⬜ à faire"]:::todo
     GUARD["kern-guard<br/>garde-fou structurel · inline · bloquant<br/>⬜ à faire"]:::todo
     PII["kern-anon<br/>anonymisation / PII (Presidio)<br/>🔌 externe · ✅ fait · ⬜ intégration"]:::extdone
@@ -134,10 +134,16 @@ Rôle : bibliothèque de tools invoqués par un agent, consommés aussi par l'UI
       faire ; c'est elle qui débloquerait C5 côté kern-ui.
 - Dépendances : EPIC-02.
 
-### ⬜ EPIC-04 · kern-exec — exécution terminal / sandbox
+### 🟡 EPIC-04 · kern-exec — exécution terminal / sandbox
 Rôle : exécuter des tools/commandes dans un bac à sable (isolation, timeouts, quotas).
-- [ ] Runner sandboxé (process isolé, cwd/env contrôlés, timeout) **M**
-- [ ] Politique de ressources (CPU/mém/FS/réseau) **L**
+- [x] Runner sandboxé (process isolé, cwd/env contrôlés, timeout) — macOS (Seatbelt) et
+  Linux (landlock + espace de noms réseau) faits et vérifiés en vrai ; Windows refuse
+  explicitement (personne n'a de machine pour vérifier). **M**
+- [ ] Liste d'autorisation réseau par IP/CIDR (`--allow-connect`) — planifiée 2026-07-31,
+  inspirée du modèle `allowOut`/`denyOut` de kvcache-ai/AgentENV (repo étudié pour
+  l'inspiration, hors de propos par l'échelle — voir `kern-exec/CLAUDE.md`, section
+  « Portée réseau »). Reste un mécanisme de confinement que kern-exec applique, pas une
+  politique qu'il décide — `kern-policy` reste le décideur le jour où elle existe. **M**
 - [ ] Intégration comme type de nœud/tool **S**
 - Dépendances : EPIC-03, EPIC-06 (policies).
 
@@ -154,6 +160,9 @@ Rôle : règles, budgets, escalade — **sans secrets** (les secrets = vault ext
 - [ ] Point d'application avant orchestration (la flèche Policies → Orchestration) **M**
 - [ ] Escalade / approbations **M**
 - Dépendances : EPIC-01.
+- Le jour où cette brique existe, la primitive réseau IP/CIDR de kern-exec (EPIC-04,
+  `--allow-connect`) est le point d'application naturel pour une règle réseau qu'elle
+  déciderait — kern-policy choisit la liste, kern-exec continue de ne faire que l'appliquer.
 
 ### ⬜ EPIC-07 · kern-guard — garde-fou structurel (inline, bloquant)
 Rôle : validation **bloquante** en ligne entre Orchestration et données (schémas, invariants).
