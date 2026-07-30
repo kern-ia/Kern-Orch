@@ -2,9 +2,13 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -409,4 +413,83 @@ func TestDaemonRunnerDecideOnANodeNotWaitingIsErrUnknownNode(t *testing.T) {
 	}
 	// Clean up.
 	_ = d.Decide(context.Background(), runID, "confirm", "", string(graph.Approved))
+}
+
+// Without this, a run parked on an approval node reports nothing at all until a level
+// completes — which never happens until someone decides it. kern-ui would have no way to
+// show a human the very decision they are meant to make. This proves the activity signal
+// fires the moment the node starts waiting, not only once it is answered.
+func TestDaemonRunnerReportsActivityWhileAnApprovalNodeWaits(t *testing.T) {
+	dir := t.TempDir()
+	graphPath := filepath.Join(dir, "confirm.yaml")
+	if err := os.WriteFile(graphPath, []byte(confirmGraph), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := openDaemonStore(t, dir)
+
+	var mu sync.Mutex
+	var signals []struct {
+		NodeID     string `json:"node_id"`
+		Generating bool   `json:"generating"`
+	}
+	sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var sig struct {
+			NodeID     string `json:"node_id"`
+			Generating bool   `json:"generating"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&sig)
+		mu.Lock()
+		signals = append(signals, sig)
+		mu.Unlock()
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer sink.Close()
+
+	d := &daemonRunner{cfg: config.Config{ActivityReportURL: sink.URL}, store: store}
+	runID, err := d.StartRun(context.Background(), graphPath, "")
+	if err != nil {
+		t.Fatalf("StartRun: %v", err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		n := len(signals)
+		mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	mu.Lock()
+	got := append([]struct {
+		NodeID     string `json:"node_id"`
+		Generating bool   `json:"generating"`
+	}{}, signals...)
+	mu.Unlock()
+	if len(got) == 0 || got[0].NodeID != "confirm" || !got[0].Generating {
+		t.Fatalf("first activity signal = %+v, want confirm/generating=true before any decision", got)
+	}
+
+	if err := d.Decide(context.Background(), runID, "confirm", "", string(graph.Approved)); err != nil {
+		t.Fatalf("Decide: %v", err)
+	}
+	waitForRun(t, store, runID, checkpoint.StatusDone)
+
+	mu.Lock()
+	got = append([]struct {
+		NodeID     string `json:"node_id"`
+		Generating bool   `json:"generating"`
+	}{}, signals...)
+	mu.Unlock()
+	found := false
+	for _, s := range got {
+		if s.NodeID == "confirm" && !s.Generating {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no generating=false signal for confirm after it was decided: %+v", got)
+	}
 }
