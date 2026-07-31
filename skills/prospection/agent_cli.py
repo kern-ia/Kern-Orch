@@ -3,86 +3,63 @@
 
 One process per node invocation — agentrunner.Subprocess's protocol (see
 Kern-Orch/internal/agentrunner/protocol.go): one JSON request on stdin
-({"node_id","prompt","state"}), one or more JSON-lines events on stdout, the last
-"result" event wins. No interactivity: kern-orch's own ApprovalNode is what pauses the
-graph for a human decision between "commercial" and "approved" — this script never
-blocks waiting for input.
+({"node_id","prompt","state"}), one JSON-lines event on stdout, the last "result" event
+wins. No interactivity: kern-orch's own ApprovalNode is what pauses the graph for a human
+decision between "commercial" and "approved" — this script never blocks waiting for input.
 
-Reuses crew-crm's already model-agnostic config, prompts and tools AS A LIBRARY — Kern
-is the demo, crew-crm is a proven source of logic, not a parallel system running
-alongside it. See ~/mon-orchestrateur-agents/agents-locaux/crew-crm/config.py
-(MODEL_BACKEND=ollama|gemini|anthropic) for the model switch used here unchanged.
+Shells out to the real `claude` CLI (Claude Code) for reasoning and MCP tool calls,
+rather than a separate LLM API. Switched from an Ollama/Gemini-via-LangChain design
+(see git history) after finding the demo's Gemini key has a free quota of ~20
+requests/day on the only viable model — Claude Code uses the operator's own existing
+authentication instead, already speaks MCP natively, and does its own tool-calling loop
+internally, which is why this adapter needs no LangChain machinery at all: `claude -p`
+runs to completion and returns finished text on stdout.
+
+Reuses crew-crm's already-written prompts (plain text constants, no LangChain coupling)
+as a library — Kern is the demo, crew-crm a proven source of prompt engineering, not a
+parallel system running alongside it.
 
 `graph.State` wire shape (Kern-Orch/internal/graph/state.go, MarshalJSON): the state
 object on the wire is {"step":N,"frozen":N,"data":{...},"zones":{...}} — every value an
 agent node reads or writes lives under "data", not at the top level.
 """
-import asyncio
 import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
 from datetime import date
 from pathlib import Path
 
 CREW_CRM = Path("/Users/yoann/mon-orchestrateur-agents/agents-locaux/crew-crm")
 sys.path.insert(0, str(CREW_CRM))
 
-# Loaded explicitly here, not left to mcp_client.charger_tools()'s side effect: that
-# function is only called by secretaire/expert (they need CRM tools), never by
-# commercial (web search only) — which would otherwise reach GOOGLE_API_KEY/
-# ANTHROPIC_API_KEY-less every time, found by running the commercial branch for real.
-from dotenv import load_dotenv  # noqa: E402
-
-load_dotenv(CREW_CRM / ".env")
-
+# Prompt text and pure string helpers only — no LangChain, no model wiring imported.
 from agents.commercial import PROMPT as COMMERCIAL_PROMPT  # noqa: E402
 from agents.commercial import _filtrer_actions, _marquer_inventions  # noqa: E402
 from agents.expert import PROMPT as EXPERT_PROMPT  # noqa: E402
-from agents.expert import _decouper_plan  # noqa: E402
-from agents.outils import boucle_react  # noqa: E402
-from agents.outils_web import TOOLS_WEB  # noqa: E402
 from agents.secretaire import PROMPT as SECRETAIRE_PROMPT  # noqa: E402
-from config import llm_fort, llm_rapide  # noqa: E402
-from mcp_client import charger_tools, tools_lecture_seule  # noqa: E402
 
+# The CRM's read-only tools this pipeline's secretaire is allowed to call — mirrors
+# mcp_client.py's own NOMS_LECTURE/suffix heuristic, spelled out explicitly here since
+# Claude Code's --allowedTools takes literal tool names (or a trailing-* wildcard), not
+# the same suffix-matching logic.
+READ_TOOLS = [
+    "mcp__crm__ping",
+    "mcp__crm__dashboard_stats",
+    "mcp__crm__calendar_view",
+    "mcp__crm__companies_list",
+    "mcp__crm__companies_get",
+    "mcp__crm__contacts_list",
+    "mcp__crm__opportunities_board",
+    "mcp__crm__scrape_jobs_list",
+    "mcp__crm__scrape_job_get",
+    "mcp__crm__quotes_list",
+    "mcp__crm__quotes_get",
+]
 
-def _silence_stdout() -> int:
-    """Redirects fd 1 to fd 2 for the rest of this process and returns a saved copy of
-    the real fd 1. Needed because crew-crm's reused code (mcp_client.charger_tools,
-    diagnostic prints in commercial.py/expert.py) writes plain text to stdout — a single
-    non-JSON line there would break agentrunner.Subprocess's line-by-line JSON parser
-    and abort the whole run. Done at the OS file-descriptor level, not by reassigning
-    Python's sys.stdout, so it also catches C-extension output the LLM/MCP client
-    libraries might produce."""
-    saved = os.dup(1)
-    os.dup2(2, 1)
-    return saved
-
-
-def _restore_stdout(saved: int) -> None:
-    # Flush BEFORE restoring: stdout is block-buffered when piped (not a terminal), so
-    # anything crew-crm's code printed while silenced is still sitting in a userspace
-    # buffer, not yet written to fd 2 — restoring first would let it leak into the real
-    # stdout the moment Python's buffer next flushes (e.g. on this script's own exit).
-    sys.stdout.flush()
-    os.dup2(saved, 1)
-    os.close(saved)
-
-
-def texte(content) -> str:
-    """Normalizes a message's `.content` to plain text across providers: Ollama and
-    Anthropic already return a string, Gemini returns a list of content blocks
-    ({"type": "text", "text": "...", ...}) — found by running this for real against
-    Gemini, not assumed. Anything else (a stray non-text block) is dropped rather than
-    stringified, so a plan or a fiche never carries a raw Python repr."""
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        return "".join(
-            block.get("text", "") for block in content if isinstance(block, dict) and block.get("type") == "text"
-        )
-    return str(content)
+CLAUDE_TIMEOUT_S = 180
 
 
 def emit_result(output: dict) -> None:
@@ -93,35 +70,70 @@ def emit_error(message: str) -> None:
     print(json.dumps({"type": "error", "message": message}), flush=True)
 
 
-async def run_secretaire(data: dict) -> dict:
+def mcp_config_path() -> str:
+    """Writes a one-off MCP config file for `claude --mcp-config` — the CRM's
+    streamable_http endpoint, credentials from this process's own environment (never
+    baked into the file's contents beyond this single run's temp file, deleted after)."""
+    url = os.environ["CRM_MCP_URL"]
+    token = os.environ["CRM_MCP_TOKEN"]
+    config = {
+        "mcpServers": {
+            "crm": {"type": "http", "url": url, "headers": {"Authorization": f"Bearer {token}"}}
+        }
+    }
+    fd, path = tempfile.mkstemp(suffix=".json", prefix="kern-crm-mcp-")
+    with os.fdopen(fd, "w") as f:
+        json.dump(config, f)
+    return path
+
+
+def run_claude(prompt: str, allowed_tools: list[str], use_mcp: bool) -> str:
+    """Runs `claude -p` to completion and returns its plain-text answer. `capture_output`
+    keeps whatever claude prints on ITS OWN stdout/stderr entirely inside `result` — it
+    never touches this process's own stdout, so (unlike the previous LangChain-based
+    adapter) there is no risk of polluting the JSON-lines protocol this script itself
+    must speak on its own stdout."""
+    args = ["claude", "-p", prompt, "--output-format", "text"]
+    mcp_path = None
+    if use_mcp:
+        mcp_path = mcp_config_path()
+        args += ["--mcp-config", mcp_path, "--strict-mcp-config"]
+    if allowed_tools:
+        args += ["--allowedTools", *allowed_tools]
+    try:
+        result = subprocess.run(
+            args, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=CLAUDE_TIMEOUT_S
+        )
+    finally:
+        if mcp_path:
+            os.unlink(mcp_path)
+    if result.returncode != 0:
+        raise RuntimeError(f"claude exited {result.returncode}: {result.stderr[:500]}")
+    return result.stdout.strip()
+
+
+def run_secretaire(data: dict) -> dict:
     message = data.get("message", "")
-    tools = await charger_tools()
-    lecture = tools_lecture_seule(tools)
-    llm = llm_rapide()
-    messages = [("system", SECRETAIRE_PROMPT), ("user", message)]
-    nouveaux = await boucle_react(llm, lecture, messages, max_tours=6)
-    return {"lead_context": texte(nouveaux[-1].content)}
+    prompt = f"{SECRETAIRE_PROMPT}\n\n--- DEMANDE ---\n{message}"
+    fiche = run_claude(prompt, READ_TOOLS, use_mcp=True)
+    return {"lead_context": fiche}
 
 
-async def run_commercial(data: dict) -> dict:
+def run_commercial(data: dict) -> dict:
     fiche = data.get("lead_context", "")
-    llm = llm_fort(temperature=0.3)
     fiche_bloc = f"--- FICHE PRÉPARÉE PAR LA SECRÉTAIRE ---\n{fiche}" if fiche else ""
     system = COMMERCIAL_PROMPT.format(
         aujourd_hui=date.today().strftime("%A %d %B %Y"), playbook="", fiche=fiche_bloc
     )
     # _filtrer_actions (below) only recognizes a line as an action if it starts with a
-    # bullet or number — a hard requirement the original prompt states loosely ("une
-    # action par ligne"). Found by testing against Gemini: it wrote the CRM plan as plain
-    # paragraphs, not bullets, so every action was silently dropped. Reinforced here,
-    # local to this adapter, rather than loosening the (deliberately strict) extraction.
-    system += (
-        "\n\nFORMAT OBLIGATOIRE pour la section PLAN D'ACTION CRM : chaque action sur "
-        "sa propre ligne, précédée d'un tiret \"- \" — jamais un paragraphe."
+    # bullet or number — reinforced explicitly here, found necessary when this adapter
+    # still called Gemini directly (it wrote plain paragraphs instead of bullets).
+    prompt = (
+        f"{system}\n\nFORMAT OBLIGATOIRE pour la section PLAN D'ACTION CRM : chaque "
+        "action sur sa propre ligne, précédée d'un tiret \"- \" — jamais un paragraphe."
+        "\n\nPrépare un plan d'action pour ce lead."
     )
-    messages = [("system", system), ("user", "Prépare un plan d'action pour ce lead.")]
-    nouveaux = await boucle_react(llm, TOOLS_WEB, messages, max_tours=6)
-    content = texte(nouveaux[-1].content)
+    content = run_claude(prompt, ["WebSearch"], use_mcp=False)
 
     plan = ""
     m = re.search(r"plan\s+d['']action\s+crm\s*:?", content, re.IGNORECASE)
@@ -133,7 +145,7 @@ async def run_commercial(data: dict) -> dict:
     return {"plan_propose": plan, "compte_rendu_commercial": content}
 
 
-async def run_expert(data: dict) -> dict:
+def run_expert(data: dict) -> dict:
     plan = data.get("plan_propose", "")
     decision = data.get("decision:confirm", "")
     if decision != "approve":
@@ -141,27 +153,18 @@ async def run_expert(data: dict) -> dict:
     if not plan:
         return {"execution": "Aucun plan à exécuter."}
 
-    tools = await charger_tools()
-    if not tools:
-        return {"execution": "⚠️ Aucun outil CRM disponible : plan NON exécuté."}
-
-    llm = llm_fort()
-    prompt_expert = EXPERT_PROMPT
     member_id = os.environ.get("CRM_MEMBER_ID", "")
+    prompt_expert = EXPERT_PROMPT
     if member_id:
         prompt_expert += f"\n- Quand un outil exige un memberId, utilise TOUJOURS : {member_id}"
 
-    lignes = []
-    for i, action in enumerate(_decouper_plan(plan), 1):
-        demande = f"Action {i} à exécuter maintenant : {action}"
-        messages = [("system", prompt_expert), ("user", demande)]
-        nouveaux = await boucle_react(llm, tools, messages, max_tours=5)
-        appels = [tc["name"] for m in nouveaux for tc in (getattr(m, "tool_calls", None) or [])]
-        conclusion = texte(nouveaux[-1].content).strip()
-        statut = "✅" if appels else "⚠️ (aucun outil appelé)"
-        lignes.append(f"{statut} Action {i} : {action}\n   outils : {appels or 'aucun'}\n   {conclusion[:300]}")
-
-    return {"execution": "\n\n".join(lignes)}
+    prompt = (
+        f"{prompt_expert}\n\n--- PLAN VALIDÉ À EXÉCUTER ---\n{plan}\n\nExécute chaque "
+        "action du plan en appelant les outils CRM nécessaires, une action à la fois, "
+        "puis conclus par un compte-rendu action par action (✅/❌, outils appelés)."
+    )
+    report = run_claude(prompt, ["mcp__crm__*"], use_mcp=True)
+    return {"execution": report}
 
 
 NODE_HANDLERS = {
@@ -171,7 +174,7 @@ NODE_HANDLERS = {
 }
 
 
-async def main() -> None:
+def main() -> None:
     req = json.loads(sys.stdin.readline())
     node_id = req["node_id"]
     data = (req.get("state") or {}).get("data") or {}
@@ -180,17 +183,13 @@ async def main() -> None:
     if handler is None:
         emit_error(f"unknown node_id: {node_id}")
         return
-
-    saved_stdout = _silence_stdout()
     try:
-        output = await handler(data)
+        output = handler(data)
     except Exception as e:
-        _restore_stdout(saved_stdout)
         emit_error(str(e))
         return
-    _restore_stdout(saved_stdout)
     emit_result(output)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

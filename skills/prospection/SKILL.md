@@ -15,15 +15,23 @@ devient `state["message"]` avant que le premier nœud (`secretaire`) ne s'exécu
 
 Nécessite `KERN_AGENT_CLI` pointé sur `skills/prospection/agent_cli.py` — un seul
 script, une branche par nœud (`secretaire`, `commercial`, `approved`), qui réutilise en
-bibliothèque la configuration de modèle agnostique et les prompts déjà écrits et vérifiés
-dans `mon-orchestrateur-agents/agents-locaux/crew-crm`.
+bibliothèque les prompts (texte pur, sans dépendance modèle) déjà écrits dans
+`mon-orchestrateur-agents/agents-locaux/crew-crm`.
 
-**Quota Gemini (démo 2026-07-31)** : la clé actuelle a un plafond gratuit d'environ 20
-requêtes/jour sur le modèle courant — vérifié en vrai, pas contournable par un autre
-modèle (les autres générations gratuites ont un quota à zéro ou sont dépréciées pour
-cette clé). `secretaire` et `commercial` sont vérifiés en vrai ; `approved` (l'écriture
-CRM) reste à vérifier lors de la répétition, une fois le quota journalier réinitialisé.
-**Secours en direct si le quota tombe à zéro pendant la démo** : relancer `kern-orch
-serve` avec `MODEL_BACKEND=ollama` dans l'environnement (aucun changement de code) — plus
-lent (qwen3.6:27b a montré 50-60s pour un mot lors des tests de cette session), mais
-fonctionnel.
+**2026-07-31, décision finale** : l'adaptateur exécute chaque nœud via le vrai CLI
+`claude` (Claude Code) — `claude -p "<prompt>" --mcp-config <crm> --allowedTools <...>`
+— pas une clé API séparée. Abandon d'un premier essai Gemini/LangChain : le quota
+gratuit de la clé de démo s'est révélé à ~20 requêtes/jour sur le seul modèle viable,
+zéro sur tous les autres testés. `claude` utilise l'authentification déjà en place, parle
+MCP nativement et fait sa propre boucle d'appel d'outils — l'adaptateur n'a donc plus
+besoin de LangChain, seulement des textes de prompt de crew-crm.
+
+**Vérifié en vrai, les trois nœuds, en une passe** : `secretaire` (~15s, fiche lead
+correcte, vérification CRM réelle), `commercial` (~61s, plan d'action réel extrait),
+`approved` (~22s, écriture réelle dans le CRM — société de test créée, ET refus correct
+d'une action pour donnée manquante, conforme à la consigne anti-hallucination du prompt
+expert). Pipeline complet (hors temps de validation humaine) : environ 1min40.
+
+**Trace laissée dans le CRM par cette vérification** : une société de test
+"Cheval Blanc SAS" (id `cms95n4j4002901nx9ydia6td`) — à supprimer ou garder comme
+donnée de démo, au choix.
