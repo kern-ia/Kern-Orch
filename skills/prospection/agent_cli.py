@@ -195,6 +195,15 @@ NODE_HANDLERS = {
     "approved": run_expert,
 }
 
+# Which of a node's own output keys is its human-readable headline — what kern-ui's hive
+# graph shows when someone clicks that node (Kern-UI/web/src/runs/HiveGraph.tsx reads
+# state["display:<nodeId>"], a convention any node handler can opt into).
+DISPLAY_KEYS = {
+    "secretaire": "lead_context",
+    "commercial": "compte_rendu_commercial",
+    "approved": "execution",
+}
+
 
 def main() -> None:
     req = json.loads(sys.stdin.readline())
@@ -210,6 +219,11 @@ def main() -> None:
     except Exception as e:
         emit_error(str(e))
         return
+
+    headline_key = DISPLAY_KEYS.get(node_id)
+    if headline_key and output.get(headline_key):
+        output[f"display:{node_id}"] = output[headline_key]
+
     emit_result(output)
 
 
