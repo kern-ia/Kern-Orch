@@ -37,7 +37,7 @@ sys.path.insert(0, str(CREW_CRM))
 
 # Prompt text and pure string helpers only — no LangChain, no model wiring imported.
 from agents.commercial import PROMPT as COMMERCIAL_PROMPT  # noqa: E402
-from agents.commercial import _filtrer_actions, _marquer_inventions  # noqa: E402
+from agents.commercial import _marquer_inventions  # noqa: E402
 from agents.expert import PROMPT as EXPERT_PROMPT  # noqa: E402
 from agents.secretaire import PROMPT as SECRETAIRE_PROMPT  # noqa: E402
 
@@ -135,14 +135,36 @@ def run_commercial(data: dict) -> dict:
     )
     content = run_claude(prompt, ["WebSearch"], use_mcp=False)
 
-    plan = ""
-    m = re.search(r"plan\s+d['']action\s+crm\s*:?", content, re.IGNORECASE)
-    if m:
-        section = re.split(r"\n(?:---|###|\*\*Message)", content[m.end():], maxsplit=1)[0]
-        plan = _filtrer_actions(section).strip(" :\n")
-        if plan:
-            plan, _ = _marquer_inventions(plan, corpus="")
+    plan = extract_plan(content)
     return {"plan_propose": plan, "compte_rendu_commercial": content}
+
+
+def extract_plan(content: str) -> str:
+    """Pulls every bulleted line out of the PLAN D'ACTION CRM section. Unlike
+    crew-crm's own _filtrer_actions (which additionally requires each line to *start*
+    with a bare imperative verb from a fixed list), this keeps conditional or hedged
+    actions too ("Si X existe, le créer", "Ne pas modifier Y tant que...") — found
+    necessary by testing for real: Claude correctly hedges an action when the lead is
+    missing data, and the stricter filter silently dropped every single line as a
+    result, leaving an empty plan despite a well-formed CRM section. The human
+    approval gate is the safety net for an over-broad extraction here, not a verb
+    whitelist."""
+    m = re.search(r"plan\s+d['']action\s+crm\s*:?", content, re.IGNORECASE)
+    if not m:
+        return ""
+    section = re.split(r"\n(?:---|###|\*\*Message)", content[m.end():], maxsplit=1)[0]
+
+    lignes = []
+    for ligne in section.splitlines():
+        bullet = re.match(r"^\s*(?:[-*]|\d+[.)])\s+(.+)", ligne)
+        if bullet:
+            lignes.append(bullet.group(1).strip())
+        elif lignes and ligne.strip():
+            lignes.append(ligne.strip())
+    plan = "\n".join(f"- {ligne}" for ligne in lignes).strip()
+    if plan:
+        plan, _ = _marquer_inventions(plan, corpus="")
+    return plan
 
 
 def run_expert(data: dict) -> dict:
