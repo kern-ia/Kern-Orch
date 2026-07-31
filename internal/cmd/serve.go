@@ -374,7 +374,21 @@ func (d *daemonRunner) Dispatch(ctx context.Context, skillName, text, requester 
 		runCtx, cancel := context.WithCancel(context.Background())
 		mailbox := d.registerMailbox(runID, cancel)
 
-		prepared, err := prepareAdhocRun(d.cfg, runID, skillName, text, requester, mailbox)
+		var prepared *preparedRun
+		if sk.Graph != "" {
+			// A fixed multi-node pipeline (e.g. an approval gate between two agent
+			// steps) rather than the one-node ad-hoc run below — same file-loading
+			// path `run`/`resume` already use. The chat's text becomes the entry
+			// node's input via the existing nudge mechanism: OnBeforeLevel drains it
+			// into state before the first level runs, so no new plumbing is needed
+			// to get free text from the chat into a file-defined graph.
+			prepared, err = prepareRun(d.cfg, runID, sk.Graph, requester, mailbox)
+			if err == nil {
+				mailbox.Nudge("message", text)
+			}
+		} else {
+			prepared, err = prepareAdhocRun(d.cfg, runID, skillName, text, requester, mailbox)
+		}
 		if err != nil {
 			cancel()
 			d.unregisterMailbox(runID)

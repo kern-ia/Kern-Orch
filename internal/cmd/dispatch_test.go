@@ -40,6 +40,31 @@ func writeDispatchSkills(t *testing.T, dir string) {
 	}
 }
 
+// writeGraphDispatchSkill writes a "pipeline" agent skill whose SKILL.md declares a
+// `graph:` — two sequential agent nodes, no approval (that mechanism has its own tests;
+// this one is only about Dispatch choosing the file-loading path and delivering the
+// chat's text into state before the entry node runs).
+func writeGraphDispatchSkill(t *testing.T, skillsDir, graphPath string) {
+	t.Helper()
+	graphDir := filepath.Join(skillsDir, "pipeline")
+	if err := os.MkdirAll(graphDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillMD := "---\nname: pipeline\ntype: agent\ngraph: " + graphPath + "\n---\n"
+	if err := os.WriteFile(filepath.Join(graphDir, "SKILL.md"), []byte(skillMD), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Distinct static prompts on purpose: the stub's default behaviour echoes whichever
+	// node ran last into state["echo"] — "second-step" surviving proves the pipeline
+	// advanced past the first node, not just that Dispatch ran *a* single node.
+	yaml := "entry: first\nnodes:\n  - id: first\n    type: agent\n    prompt: first-step\n  - id: second\n" +
+		"    type: agent\n    prompt: second-step\nedges:\n  - from: first\n    to: [second]\n"
+	if err := os.WriteFile(graphPath, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDaemonRunnerDispatchInvokesATool(t *testing.T) {
 	dir := t.TempDir()
 	writeDispatchSkills(t, dir)
@@ -81,6 +106,41 @@ func TestDaemonRunnerDispatchLaunchesAnAgentRun(t *testing.T) {
 	}
 	if v, _ := rec.State.Get("echo"); v != "analyse ceci" {
 		t.Errorf("stub did not receive the dispatched text as its prompt: %v", v)
+	}
+}
+
+// The real proof for the demo's pipeline skill: a `graph:` in SKILL.md makes Dispatch
+// load the FILE graph (both nodes run, not a single ad-hoc one), and the chat's text
+// reaches the entry node via the existing nudge mechanism before it executes.
+func TestDaemonRunnerDispatchWithAGraphLoadsTheFileAndNudgesTheMessage(t *testing.T) {
+	dir := t.TempDir()
+	writeDispatchSkills(t, dir)
+	graphPath := filepath.Join(t.TempDir(), "pipeline.yaml")
+	writeGraphDispatchSkill(t, dir, graphPath)
+	store := openDaemonStore(t, dir)
+	d := &daemonRunner{cfg: config.Config{SkillsDir: dir}, store: store}
+
+	result, err := d.Dispatch(context.Background(), "pipeline", "bonjour le CRM", "yoann")
+	if err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	if result.Kind != "run" || result.RunID == "" {
+		t.Fatalf("got %+v", result)
+	}
+	waitForRun(t, store, result.RunID, checkpoint.StatusDone)
+
+	rec, ok, err := d.GetRun(context.Background(), result.RunID)
+	if err != nil || !ok {
+		t.Fatalf("GetRun: ok=%v err=%v", ok, err)
+	}
+	if v, _ := rec.State.Get("message"); v != "bonjour le CRM" {
+		t.Errorf("nudged message = %v, want the dispatched text delivered before the entry node ran", v)
+	}
+	// Both nodes ran, in order: the stub's default behaviour overwrites state["echo"]
+	// with whichever node ran last — "second-step" surviving is proof the pipeline
+	// advanced past the first node, not that a single ad-hoc node ran instead.
+	if v, _ := rec.State.Get("echo"); v != "second-step" {
+		t.Errorf("echo = %v, want \"second-step\" — proof the pipeline ran both nodes in order", v)
 	}
 }
 

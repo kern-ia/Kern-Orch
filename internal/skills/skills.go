@@ -42,7 +42,12 @@ type Skill struct {
 	// Params is the input the command accepts. Declared here, not guessed from a call,
 	// so a caller can be told what a tool needs before ever invoking it.
 	Params []Param `yaml:"params,omitempty"`
-	Dir    string  `yaml:"-"`
+	// Graph is a topology YAML path for an agent skill dispatched from chat. Empty (most
+	// agent skills, e.g. planner) means the one-node ad-hoc run C6 already builds; set,
+	// Dispatch loads this file instead — a fixed multi-node pipeline (e.g. a human
+	// approval gate between two agent steps) triggered the same way as a single agent.
+	Graph string `yaml:"graph,omitempty"`
+	Dir   string `yaml:"-"`
 }
 
 // Registry holds the loaded skills keyed by name.
