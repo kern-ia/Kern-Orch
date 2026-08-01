@@ -544,6 +544,15 @@ func newServeCmd() *cobra.Command {
 			}
 			defer store.Close()
 
+			// Same reasoning as `run`'s own call: the catalogue rides along so kern-ui's
+			// Grimoire has something to show without a human running `publish-skills` by
+			// hand first. A daemon runs for hours or days, so this fires once at startup
+			// rather than per-dispatch — best-effort, a dead sink must never stop the
+			// server from listening.
+			if err := publishRegistry(cmd.Context(), cfg, cfg.SkillsDir); err != nil {
+				slog.Warn("kern-orch: publish skills catalogue", "error", err)
+			}
+
 			runner := &daemonRunner{cfg: cfg, store: store}
 			srv := &http.Server{
 				Addr:              cfg.ServeAddr,
