@@ -1,7 +1,7 @@
 ---
 name: greeting
 type: tool
-description: Renders a personalized greeting — demo tool for the Espace widget contract (EPIC-03/C5)
+description: Envoie un message d'accueil personnalisé.
 command: ["python3", "skills/greeting/tool.py"]
 params:
   - name: name

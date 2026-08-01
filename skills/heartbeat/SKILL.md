@@ -1,7 +1,7 @@
 ---
 name: heartbeat
 type: tool
-description: Reports the current time — demo tool with no required input, for a widget the Espace can invoke with no configuration
+description: Donne l'heure actuelle du serveur.
 command: ["python3", "skills/heartbeat/tool.py"]
 ---
 
