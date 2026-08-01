@@ -1,7 +1,7 @@
 ---
 name: crm-dashboard
 type: tool
-description: Live pipeline value from the CRM's own dashboard — no config needed, appears as an Espace widget
+description: Affiche en direct la valeur du pipeline commercial du CRM.
 command: ["/Users/yoann/mon-orchestrateur-agents/.venv/bin/python3", "skills/crm-dashboard/tool.py"]
 ---
 

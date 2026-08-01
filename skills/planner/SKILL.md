@@ -1,7 +1,7 @@
 ---
 name: planner
 type: agent
-description: General-purpose agent skill — demo for chat dispatch (C6, /planner text…)
+description: Répond à une demande libre, sans compétence dédiée.
 ---
 
 # planner
