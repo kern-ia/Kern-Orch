@@ -53,6 +53,13 @@ second, en instruction supplémentaire au prompt du stratège (pas en modifiant
   (celui de `crew-comm/agents/redacteur.py`, non dupliqué) — un email se dit donc
   "Publier l'email..." plutôt que "Envoyer l'email...", pour ne pas casser l'extraction du
   plan partagée avec le canal social.
+- **Telegram** (2026-08-06) — premier canal avec un vrai connecteur. `run_publieur`
+  détecte "Telegram" dans la ligne "Plateforme(s) :" du brief et, si la publication est
+  approuvée et que les identifiants Telegram sont configurés dans l'environnement du
+  process Python, envoie réellement le texte rédigé via l'API Bot Telegram (module
+  standard `urllib`, aucune dépendance ajoutée). Sans détection ou sans identifiants, le
+  garde-fou habituel s'applique comme avant. La validation humaine reste le seul geste qui
+  déclenche l'envoi.
 
 ## Vérifié
 
