@@ -58,6 +58,32 @@ selon les règles ci-dessous, en terminant par la section "BRIEF ÉDITORIAL" com
 
 MODE_RE = re.compile(r"^\s*MODE\s*:\s*(avis|proposition)", re.IGNORECASE)
 
+# 2026-08-06, décision : crew-comm ne connaît que les réseaux sociaux (le prompt du
+# stratège liste explicitement "LinkedIn, Instagram, X, TikTok..."). L'email froid n'y
+# figure pas du tout — ajouté ici en instruction supplémentaire, même technique que
+# STRATEGISTE_MODE_INSTRUCTION, sans toucher à crew-comm/agents/strategiste.py.
+STRATEGISTE_EMAIL_INSTRUCTION = """Une plateforme supplémentaire existe, en plus de celles
+déjà citées : "email froid" (prospection écrite, outreach). Si elle est pertinente pour la
+demande, tu peux la choisir comme plateforme — avec ses propres codes, différents de
+LinkedIn : objet court et concret (jamais putaclic), corps de 3 à 6 phrases, un seul
+call-to-action, aucun emoji, ton direct. Si une relance à plusieurs touches est pertinente,
+propose un nombre de touches (2 à 4) espacées dans le temps plutôt qu'un email unique —
+précise l'espacement (ex. "J+3", "J+7") dans le brief éditorial."""
+
+# Le squelette de plan de redacteur.py (RAPPEL_FORMAT) n'accepte que les lignes commençant
+# par "Publier"/"Programmer"/"Planifier" (VERBES_ACTION, crew-comm/agents/redacteur.py) —
+# _extraire_plan filtre tout le reste. Plutôt que dupliquer cette extraction avec un
+# quatrième verbe, l'email réutilise le même verbe "Publier" au prix d'une légère bizarrerie
+# de phrasé ("Publier l'email...") : garde une seule logique d'extraction, zéro divergence
+# avec crew-comm.
+REDACTEUR_EMAIL_INSTRUCTION = """Si le brief éditorial indique la plateforme "email froid" :
+- Rédige une ligne "Objet : ..." avant le corps du message.
+- Corps court (3 à 6 phrases), un seul call-to-action, aucun lien de tracking inventé.
+- Si le brief demande plusieurs touches, rédige chaque touche séparément ("Touche 1",
+  "Touche 2"...), chacune avec son propre objet et corps.
+- Le squelette de plan reste inchangé : chaque ligne commence quand même par "Publier",
+  "Programmer" ou "Planifier" — ex. "Publier l'email à <destinataire> le <date> : <objet>"."""
+
 
 def emit_result(output: dict) -> None:
     print(json.dumps({"type": "result", "output": output}), flush=True)
@@ -109,7 +135,10 @@ def run_strategiste(data: dict) -> dict:
         playbook="",
         audience=audience,
     )
-    prompt = f"{STRATEGISTE_MODE_INSTRUCTION}\n\n{system}\n\n--- DEMANDE DE L'UTILISATEUR ---\n{message}"
+    prompt = (
+        f"{STRATEGISTE_MODE_INSTRUCTION}\n\n{STRATEGISTE_EMAIL_INSTRUCTION}\n\n{system}"
+        f"\n\n--- DEMANDE DE L'UTILISATEUR ---\n{message}"
+    )
     content = run_claude(prompt)
 
     mode = extract_mode(content)
@@ -133,7 +162,8 @@ def run_redacteur(data: dict) -> dict:
         playbook="",
         brief=brief,
     )
-    content = run_claude(system)
+    prompt = f"{REDACTEUR_EMAIL_INSTRUCTION}\n\n{system}"
+    content = run_claude(prompt)
     plan = _extraire_plan(content)
     return {"plan_propose": plan, "texte_redige": content}
 

@@ -43,6 +43,17 @@ second, en instruction supplémentaire au prompt du stratège (pas en modifiant
   l'instant), `run_publieur` ne fait aucun appel modèle et signale explicitement que rien
   n'a été publié (même garde-fou G2 que `crew-comm/agents/publieur.py`).
 
+## Canaux couverts
+
+- **Réseaux sociaux** (LinkedIn, Instagram, X, TikTok) — d'origine dans le prompt du
+  stratège de `crew-comm`. LinkedIn seul vérifié en réel pour l'instant.
+- **Email froid / outreach** (2026-08-06) — ajouté par instruction, `crew-comm` ne le
+  connaissait pas nativement. Objet + corps court, éventuellement plusieurs touches
+  espacées dans le temps. Le squelette de plan reste "Publier"/"Programmer"/"Planifier"
+  (celui de `crew-comm/agents/redacteur.py`, non dupliqué) — un email se dit donc
+  "Publier l'email..." plutôt que "Envoyer l'email...", pour ne pas casser l'extraction du
+  plan partagée avec le canal social.
+
 ## Vérifié
 
 Logique pure vérifiée en isolation (`extract_mode`/`strip_mode_line`, `run_publieur` avec
