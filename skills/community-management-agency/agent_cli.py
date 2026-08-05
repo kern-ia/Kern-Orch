@@ -160,6 +160,28 @@ inchangé : "Publier sur X le <date> : <référence au texte>"."""
 
 X_PLATFORM_RE = re.compile(r"(?i:plateforme\(s\))[*_\s]*:[^\n]*\b(X|[Tt]witter)\b")
 
+# Newsletter/blog (2026-08-06) : format long, à l'opposé des canaux courts ci-dessus —
+# aucun connecteur réel (pas de plateforme d'emailing ni de CMS branché), reste en mode
+# "propose, l'humain publie" comme LinkedIn/Instagram/TikTok. Ajouté par instruction, même
+# technique que les canaux précédents, sans toucher à crew-comm.
+STRATEGISTE_NEWSLETTER_INSTRUCTION = """Une autre plateforme est disponible :
+"newsletter/blog" (format long). Codes propres, à l'opposé des réseaux sociaux et de
+l'email court : article structuré de 500 à 1500 mots, titre accrocheur mais honnête (pas
+putaclic), introduction qui pose le problème du lecteur avant la solution, 2 à 4 sections
+avec sous-titres, conclusion avec un appel à l'action clair. Pour un blog, garder les
+mots-clés naturels dans le texte (pas de bourrage SEO artificiel) ; pour une newsletter,
+prévoir en plus une ligne d'objet courte et concrète (ce que voit le lecteur dans sa boîte
+de réception, distincte du titre de l'article)."""
+
+REDACTEUR_NEWSLETTER_INSTRUCTION = """Si le brief éditorial indique la plateforme
+"newsletter/blog" :
+- Si newsletter : une ligne "Objet : ..." avant le titre de l'article.
+- Titre de l'article, puis introduction, puis les sections annoncées par le brief
+  (sous-titres avec "##"), puis une conclusion avec un appel à l'action.
+- Longueur réelle 500 à 1500 mots — ne pas tronquer artificiellement, mais ne pas délayer
+  non plus pour atteindre un volume.
+- Le squelette de plan reste inchangé : "Publier l'article le <date> : <titre>"."""
+
 X_TWEETS_URL = "https://api.twitter.com/2/tweets"
 X_CHAR_LIMIT = 280
 
@@ -295,7 +317,8 @@ def run_strategiste(data: dict) -> dict:
     )
     prompt = (
         f"{STRATEGISTE_MODE_INSTRUCTION}\n\n{STRATEGISTE_EMAIL_INSTRUCTION}"
-        f"\n\n{STRATEGISTE_TELEGRAM_INSTRUCTION}\n\n{STRATEGISTE_X_INSTRUCTION}\n\n{system}"
+        f"\n\n{STRATEGISTE_TELEGRAM_INSTRUCTION}\n\n{STRATEGISTE_X_INSTRUCTION}"
+        f"\n\n{STRATEGISTE_NEWSLETTER_INSTRUCTION}\n\n{system}"
         f"\n\n--- DEMANDE DE L'UTILISATEUR ---\n{message}"
     )
     content = run_claude(prompt)
@@ -323,7 +346,7 @@ def run_redacteur(data: dict) -> dict:
     )
     prompt = (
         f"{REDACTEUR_EMAIL_INSTRUCTION}\n\n{REDACTEUR_TELEGRAM_INSTRUCTION}"
-        f"\n\n{REDACTEUR_X_INSTRUCTION}\n\n{system}"
+        f"\n\n{REDACTEUR_X_INSTRUCTION}\n\n{REDACTEUR_NEWSLETTER_INSTRUCTION}\n\n{system}"
     )
     content = run_claude(prompt)
     plan = _extraire_plan(content)
