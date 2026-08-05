@@ -23,9 +23,12 @@ object on the wire is {"step":N,"frozen":N,"data":{...},"zones":{...}} — every
 agent node reads or writes lives under "data", not at the top level.
 """
 import json
+import os
 import re
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from datetime import date
 from pathlib import Path
 
@@ -84,6 +87,53 @@ REDACTEUR_EMAIL_INSTRUCTION = """Si le brief éditorial indique la plateforme "e
 - Le squelette de plan reste inchangé : chaque ligne commence quand même par "Publier",
   "Programmer" ou "Planifier" — ex. "Publier l'email à <destinataire> le <date> : <objet>"."""
 
+# Telegram est le premier canal avec un vrai connecteur (voir send_telegram plus bas) —
+# contrairement à email/réseaux sociaux, encore en mode "propose, l'humain publie". Le
+# ton reste volontairement différent de LinkedIn : Telegram est un canal direct, pas un
+# canal de représentation professionnelle.
+STRATEGISTE_TELEGRAM_INSTRUCTION = """Une autre plateforme est disponible : "Telegram"
+(message direct, canal court). Codes propres : ton informel et direct (moins de
+storytelling professionnel que LinkedIn), message court (quelques phrases), *gras* et
+_italique_ (formatage Telegram natif) plutôt que des mises en forme complexes, emoji
+ponctuel toléré si le ton s'y prête. Pas d'objet (ce n'est pas un email)."""
+
+REDACTEUR_TELEGRAM_INSTRUCTION = """Si le brief éditorial indique la plateforme
+"Telegram" : pas de section "Objet", texte direct prêt à être envoyé tel quel (le
+formatage *gras*/_italique_ Telegram est autorisé dans le corps). Le squelette de plan
+reste inchangé : "Publier sur Telegram le <date> : <référence au texte>"."""
+
+# Détecte Telegram dans la ligne "Plateforme(s) :" du brief éditorial du stratège — pas
+# une analyse fine, un mot-clé suffit ici : le geste qui déclenche vraiment l'envoi reste
+# la validation humaine de confirm_publication, cette détection ne fait que choisir QUEL
+# connecteur essayer une fois l'accord donné, jamais si on publie ou non.
+TELEGRAM_PLATFORM_RE = re.compile(r"plateforme\(s\)[*_\s]*:.*telegram", re.IGNORECASE)
+
+
+def send_telegram(text: str) -> str:
+    """Sends text to the configured chat via the Telegram Bot API. Returns "" (caller
+    falls back to the G2 no-connector message) when unconfigured; raises RuntimeError on
+    a real failure (network, or Telegram itself refusing the message) so the human sees
+    an honest failure rather than a false "published"."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        return ""
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = json.dumps({"chat_id": chat_id, "text": text}).encode()
+    req = urllib.request.Request(
+        url, data=payload, headers={"Content-Type": "application/json"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read())
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Telegram injoignable : {e}") from e
+
+    if not body.get("ok"):
+        raise RuntimeError(f"Telegram a refusé le message : {body.get('description', body)}")
+    return f"message_id {body['result']['message_id']}"
+
 
 def emit_result(output: dict) -> None:
     print(json.dumps({"type": "result", "output": output}), flush=True)
@@ -136,7 +186,8 @@ def run_strategiste(data: dict) -> dict:
         audience=audience,
     )
     prompt = (
-        f"{STRATEGISTE_MODE_INSTRUCTION}\n\n{STRATEGISTE_EMAIL_INSTRUCTION}\n\n{system}"
+        f"{STRATEGISTE_MODE_INSTRUCTION}\n\n{STRATEGISTE_EMAIL_INSTRUCTION}"
+        f"\n\n{STRATEGISTE_TELEGRAM_INSTRUCTION}\n\n{system}"
         f"\n\n--- DEMANDE DE L'UTILISATEUR ---\n{message}"
     )
     content = run_claude(prompt)
@@ -162,7 +213,7 @@ def run_redacteur(data: dict) -> dict:
         playbook="",
         brief=brief,
     )
-    prompt = f"{REDACTEUR_EMAIL_INSTRUCTION}\n\n{system}"
+    prompt = f"{REDACTEUR_EMAIL_INSTRUCTION}\n\n{REDACTEUR_TELEGRAM_INSTRUCTION}\n\n{system}"
     content = run_claude(prompt)
     plan = _extraire_plan(content)
     return {"plan_propose": plan, "texte_redige": content}
@@ -171,13 +222,30 @@ def run_redacteur(data: dict) -> dict:
 def run_publieur(data: dict) -> dict:
     decision = data.get("decision:confirm_publication", "")
     plan = data.get("plan_propose", "")
+    brief = data.get("brief_editorial", "")
     if decision != "approve":
         return {"execution": "Refusé par l'utilisateur : rien n'a été publié."}
     if not plan:
         return {"execution": "Aucun plan de publication à exécuter."}
+
+    # Telegram : premier canal avec un vrai connecteur. La validation humaine ci-dessus
+    # reste le seul geste qui déclenche l'envoi — pas de mode automatique qui la
+    # court-circuiterait, ça viendra plus tard comme un choix explicite séparé.
+    if TELEGRAM_PLATFORM_RE.search(brief):
+        texte = data.get("texte_redige", "")
+        if texte:
+            try:
+                ref = send_telegram(texte)
+            except RuntimeError as e:
+                return {"execution": f"⚠️ Échec de l'envoi Telegram : {e}\n\n{plan}"}
+            if ref:
+                return {"execution": f"✅ Envoyé sur Telegram ({ref}).\n\n{plan}"}
+        # Pas de texte, ou send_telegram a renvoyé "" (pas configuré) : retombe sur le
+        # garde-fou G2 ci-dessous, mêmes règles que les autres canaux.
+
     # G2 de crew-comm/agents/publieur.py, reproduit à l'identique : sans connecteur de
-    # publication branché (aucun --mcp-config ici), on n'appelle même pas le modèle —
-    # c'est la seule façon sûre d'empêcher un faux compte-rendu de publication.
+    # publication branché, on n'appelle même pas le modèle — c'est la seule façon sûre
+    # d'empêcher un faux compte-rendu de publication.
     return {
         "execution": (
             "⚠️ Aucun connecteur de publication n'est branché : plan validé mais NON "
