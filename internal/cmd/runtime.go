@@ -112,6 +112,15 @@ func builtinRegistry(runner graph.AgentRunner, cfg config.Config) *topology.Regi
 		}
 		return []string{"refused"}
 	})
+	// community-management-agency routers (internal/cmd/comm_routers.go): onStrategyMode
+	// after the strategiste node, and one decisionRouter per approval gate — this graph
+	// has two, so it cannot reuse onConfirmDecision above (hardcoded to a single node
+	// named "confirm").
+	reg.Router("onStrategyMode", onStrategyMode)
+	reg.Router("onStrategieDecision", decisionRouter("confirm_strategie",
+		[]string{"redacteur"}, []string{"strategie_refusee"}))
+	reg.Router("onPublicationDecision", decisionRouter("confirm_publication",
+		[]string{"publieur"}, []string{"refus_publication"}))
 	return reg
 }
 
