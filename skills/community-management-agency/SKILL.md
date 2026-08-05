@@ -60,6 +60,18 @@ second, en instruction supplémentaire au prompt du stratège (pas en modifiant
   standard `urllib`, aucune dépendance ajoutée). Sans détection ou sans identifiants, le
   garde-fou habituel s'applique comme avant. La validation humaine reste le seul geste qui
   déclenche l'envoi.
+- **X** (2026-08-06) — deuxième canal avec un vrai connecteur (API v2, signature OAuth
+  1.0a écrite à la main avec la bibliothèque standard, aucune dépendance ajoutée). Limite
+  de 280 caractères vérifiée côté code avant l'appel réseau (échec explicite plutôt qu'un
+  400 confus de l'API). Un seul post, pas de thread pour l'instant. Même contrat que
+  Telegram : sans identifiants, garde-fou habituel.
+- **Instagram / TikTok** — toujours en mode "propose, l'humain publie", volontairement.
+  Contrainte réelle de plateforme, pas un oubli : l'API Graph d'Instagram et l'API de
+  publication TikTok exigent toutes les deux une image ou une vidéo, aucune n'accepte un
+  post texte seul. Un vrai connecteur pour ces deux-là suppose une brique de génération
+  d'image en amont (piste évoquée, non construite : `kern-image`, ou un skill dédié qui
+  appelle un service tiers type Higgsfield / GPT-image) — hors périmètre de ce skill tant
+  qu'elle n'existe pas.
 
 ## Vérifié
 

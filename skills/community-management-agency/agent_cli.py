@@ -22,12 +22,18 @@ convention, reused anyway, same precedent.
 object on the wire is {"step":N,"frozen":N,"data":{...},"zones":{...}} — every value an
 agent node reads or writes lives under "data", not at the top level.
 """
+import base64
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import date
 from pathlib import Path
@@ -135,6 +141,108 @@ def send_telegram(text: str) -> str:
     return f"message_id {body['result']['message_id']}"
 
 
+# X (2026-08-06) : deuxième canal avec un vrai connecteur, et le seul des trois évoqués
+# ce tour (Instagram/X/TikTok) où "publier du texte seul" correspond à une vraie API —
+# Instagram Graph API et l'API de publication TikTok exigent toutes les deux une image ou
+# une vidéo, aucune n'accepte un post texte nu. Ces deux-là restent donc en mode "propose,
+# l'humain publie" (garde-fou G2) tant qu'aucune brique de génération d'image n'existe
+# (piste notée : kern-image, ou un skill appelant un service tiers type Higgsfield /
+# GPT-image — à construire séparément, pas dans ce commit).
+STRATEGISTE_X_INSTRUCTION = """Si tu choisis "X" comme plateforme : c'est un texte court
+(limite stricte de 280 caractères côté plateforme — une publication plus longue sera
+rejetée), percutant, peu ou pas de hashtags. Un seul post pour l'instant, pas de thread
+(fonctionnalité pas encore prise en charge par ce canal)."""
+
+REDACTEUR_X_INSTRUCTION = """Si le brief éditorial indique la plateforme "X" : corps du
+message strictement inférieur à 280 caractères (limite de la plateforme, non négociable —
+compte les caractères), un seul post, pas de section "Objet". Le squelette de plan reste
+inchangé : "Publier sur X le <date> : <référence au texte>"."""
+
+X_PLATFORM_RE = re.compile(r"(?i:plateforme\(s\))[*_\s]*:[^\n]*\b(X|[Tt]witter)\b")
+
+X_TWEETS_URL = "https://api.twitter.com/2/tweets"
+X_CHAR_LIMIT = 280
+
+
+def _oauth1_header(method: str, url: str, consumer_key: str, consumer_secret: str,
+                    token: str, token_secret: str) -> str:
+    """Builds an OAuth 1.0a Authorization header (HMAC-SHA1) — the signing scheme the X
+    API v2 posting endpoint requires for user-context requests. Hand-rolled with stdlib
+    (hmac/hashlib/base64) rather than a new dependency: RFC 5849 is small and stable, and
+    this is the only endpoint this skill calls."""
+    oauth_params = {
+        "oauth_consumer_key": consumer_key,
+        "oauth_nonce": secrets.token_hex(16),
+        "oauth_signature_method": "HMAC-SHA1",
+        "oauth_timestamp": str(int(time.time())),
+        "oauth_token": token,
+        "oauth_version": "1.0",
+    }
+    param_string = "&".join(
+        f"{urllib.parse.quote(k, safe='')}={urllib.parse.quote(v, safe='')}"
+        for k, v in sorted(oauth_params.items())
+    )
+    base_string = "&".join([
+        method.upper(),
+        urllib.parse.quote(url, safe=""),
+        urllib.parse.quote(param_string, safe=""),
+    ])
+    signing_key = (
+        f"{urllib.parse.quote(consumer_secret, safe='')}"
+        f"&{urllib.parse.quote(token_secret, safe='')}"
+    )
+    signature = base64.b64encode(
+        hmac.new(signing_key.encode(), base_string.encode(), hashlib.sha1).digest()
+    ).decode()
+    oauth_params["oauth_signature"] = signature
+    return "OAuth " + ", ".join(
+        f'{urllib.parse.quote(k, safe="")}="{urllib.parse.quote(v, safe="")}"'
+        for k, v in sorted(oauth_params.items())
+    )
+
+
+def send_x(text: str) -> str:
+    """Posts a single tweet via the X API v2. Same contract as send_telegram: "" when
+    unconfigured, RuntimeError on a real failure — including a message over the
+    platform's own character limit, checked before the network call rather than left to
+    a confusing 400 from the API."""
+    consumer_key = os.environ.get("X_API_KEY", "")
+    consumer_secret = os.environ.get("X_API_SECRET", "")
+    token = os.environ.get("X_ACCESS_TOKEN", "")
+    token_secret = os.environ.get("X_ACCESS_TOKEN_SECRET", "")
+    if not (consumer_key and consumer_secret and token and token_secret):
+        return ""
+
+    if len(text) > X_CHAR_LIMIT:
+        raise RuntimeError(
+            f"texte trop long pour X ({len(text)} caractères, limite {X_CHAR_LIMIT}) — "
+            "publication non exécutée."
+        )
+
+    auth_header = _oauth1_header(
+        "POST", X_TWEETS_URL, consumer_key, consumer_secret, token, token_secret
+    )
+    payload = json.dumps({"text": text}).encode()
+    req = urllib.request.Request(
+        X_TWEETS_URL,
+        data=payload,
+        headers={"Content-Type": "application/json", "Authorization": auth_header},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            body = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")
+        raise RuntimeError(f"X a refusé le message : {detail}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"X injoignable : {e}") from e
+
+    tweet_id = body.get("data", {}).get("id")
+    if not tweet_id:
+        raise RuntimeError(f"X a répondu sans identifiant de tweet : {body}")
+    return f"tweet_id {tweet_id}"
+
+
 def emit_result(output: dict) -> None:
     print(json.dumps({"type": "result", "output": output}), flush=True)
 
@@ -187,7 +295,7 @@ def run_strategiste(data: dict) -> dict:
     )
     prompt = (
         f"{STRATEGISTE_MODE_INSTRUCTION}\n\n{STRATEGISTE_EMAIL_INSTRUCTION}"
-        f"\n\n{STRATEGISTE_TELEGRAM_INSTRUCTION}\n\n{system}"
+        f"\n\n{STRATEGISTE_TELEGRAM_INSTRUCTION}\n\n{STRATEGISTE_X_INSTRUCTION}\n\n{system}"
         f"\n\n--- DEMANDE DE L'UTILISATEUR ---\n{message}"
     )
     content = run_claude(prompt)
@@ -213,7 +321,10 @@ def run_redacteur(data: dict) -> dict:
         playbook="",
         brief=brief,
     )
-    prompt = f"{REDACTEUR_EMAIL_INSTRUCTION}\n\n{REDACTEUR_TELEGRAM_INSTRUCTION}\n\n{system}"
+    prompt = (
+        f"{REDACTEUR_EMAIL_INSTRUCTION}\n\n{REDACTEUR_TELEGRAM_INSTRUCTION}"
+        f"\n\n{REDACTEUR_X_INSTRUCTION}\n\n{system}"
+    )
     content = run_claude(prompt)
     plan = _extraire_plan(content)
     return {"plan_propose": plan, "texte_redige": content}
@@ -242,6 +353,17 @@ def run_publieur(data: dict) -> dict:
                 return {"execution": f"✅ Envoyé sur Telegram ({ref}).\n\n{plan}"}
         # Pas de texte, ou send_telegram a renvoyé "" (pas configuré) : retombe sur le
         # garde-fou G2 ci-dessous, mêmes règles que les autres canaux.
+
+    # X : même contrat que Telegram ci-dessus (validation humaine = seul déclencheur).
+    if X_PLATFORM_RE.search(brief):
+        texte = data.get("texte_redige", "")
+        if texte:
+            try:
+                ref = send_x(texte)
+            except RuntimeError as e:
+                return {"execution": f"⚠️ Échec de l'envoi X : {e}\n\n{plan}"}
+            if ref:
+                return {"execution": f"✅ Envoyé sur X ({ref}).\n\n{plan}"}
 
     # G2 de crew-comm/agents/publieur.py, reproduit à l'identique : sans connecteur de
     # publication branché, on n'appelle même pas le modèle — c'est la seule façon sûre
