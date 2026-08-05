@@ -65,6 +65,9 @@ second, en instruction supplémentaire au prompt du stratège (pas en modifiant
   de 280 caractères vérifiée côté code avant l'appel réseau (échec explicite plutôt qu'un
   400 confus de l'API). Un seul post, pas de thread pour l'instant. Même contrat que
   Telegram : sans identifiants, garde-fou habituel.
+- **Newsletter / blog** (2026-08-06) — format long (500-1500 mots), objet (si
+  newsletter) + titre honnête + introduction + sections à sous-titres + conclusion avec
+  appel à l'action. Pas de connecteur réel, comme LinkedIn/Instagram/TikTok.
 - **Instagram / TikTok** — toujours en mode "propose, l'humain publie", volontairement.
   Contrainte réelle de plateforme, pas un oubli : l'API Graph d'Instagram et l'API de
   publication TikTok exigent toutes les deux une image ou une vidéo, aucune n'accepte un
