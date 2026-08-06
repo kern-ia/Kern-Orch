@@ -140,6 +140,11 @@ func builtinRegistry(runner graph.AgentRunner, cfg config.Config) *topology.Regi
 	reg.Tool("deanonymizeMemoOutput", deanonymizeMemoOutput)
 	reg.Router("onMemoDecision", decisionRouter("confirm_memo",
 		[]string{"memo_valide"}, []string{"memo_a_corriger"}))
+	// courtage-extraction besoin #3 (relances pièces manquantes, specs.md) — notifies the
+	// internal team (existing "notify" tool above, same fixed Telegram destination), never
+	// the client directly (no client->chat_id model exists, and Telegram cannot message a
+	// user who hasn't messaged the bot first — see docs/index for the cadrage decision).
+	reg.Router("onRelanceNeeded", onRelanceNeeded)
 	return reg
 }
 

@@ -1,15 +1,15 @@
 ---
 name: courtage-extraction
 type: agent
-description: Extrait les données structurées d'un dossier de rachat de crédit puis rédige un draft de mémorandum de financement — OCR pur, masquage PII avant tout modèle de raisonnement, validation humaine à chaque étape
+description: Extrait les données structurées d'un dossier de rachat de crédit, rédige un draft de mémorandum de financement, et notifie l'équipe des pièces manquantes — OCR pur, masquage PII avant tout modèle de raisonnement, validation humaine sur les étapes qui comptent
 graph: examples/courtage-extraction.yaml
 ---
 
 # courtage-extraction
 
-Besoins #1 (extraction documentaire) et #2 (copilote de mémorandum) de l'agence de
-courtage (rachat de crédit), enchaînés dans le MÊME graphe/run — voir
-`Kern-Orch/skills/specs.md`, section 2, pour le cadrage complet.
+Besoins #1 (extraction documentaire), #2 (copilote de mémorandum) et #3 (relances pièces
+manquantes) de l'agence de courtage (rachat de crédit), enchaînés dans le MÊME graphe/run
+— voir `Kern-Orch/skills/specs.md`, section 2, pour le cadrage complet.
 
 Dispatché depuis le chat (`/courtage-extraction /chemin/vers/dossier.pdf`) : le texte du
 message EST le chemin du document (`mailbox.Nudge("message", text)` côté kern-orch,
@@ -94,9 +94,34 @@ extraction_validee → memo_prep → masquage_memo → redaction_memo → demasq
 - **confirm_memo** : validation humaine du draft — "l'analyste n'a plus qu'à relire et
   affiner" (besoin prospect original).
 
+## Besoin #3 — Relances pièces manquantes
+
+En parallèle du mémorandum (pas séquentiel), déclenché juste après `extraction_validee` :
+
+```
+extraction_validee → [onRelanceNeeded] → relance_prep → relance_notify
+                                       ↘ relance_non_necessaire (si rien ne manque)
+```
+
+- **onRelanceNeeded** (`internal/cmd/courtage_relance.go`) : lit `pieces_manquantes` dans
+  `interpretation` (le dossier démasqué du besoin #1), route toujours vers `memo_prep` en
+  plus de la branche relance — un seul routeur combine les deux car kern-orch n'autorise
+  qu'une route par nœud source.
+- **relance_prep** (`agent_cli.py`) : formate `state["message"]` (la clé fixe que lit le
+  tool `notify` déjà construit) à partir de la vraie liste de pièces manquantes. Ne
+  fabrique jamais une liste si le dossier est illisible — message générique demandant une
+  vérification manuelle à la place.
+- **relance_notify** (tool `notify`, déjà construit) : envoie sur le canal Telegram
+  interne déjà configuré (`KERN_TELEGRAM_BOT_TOKEN`/`KERN_TELEGRAM_CHAT_ID`).
+- **Notifie l'équipe interne, jamais le client** : décision cadrée avant de coder — aucun
+  modèle client → coordonnées n'existe, et Telegram ne peut pas contacter un utilisateur
+  qui n'a pas parlé au bot en premier. L'IA rédige, l'humain transmet.
+- **Pas de validation humaine avant l'envoi** — notification interne, pas une action
+  visible du client (contrairement à la publication de `community-management-agency`).
+
 ## Reste à faire
 
 Voir `Kern-Orch/skills/specs.md` section 2 : ingestion UI/Telegram, vérification réelle
 du chemin Mistral OCR, détection de noms propres (nécessiterait un moteur NLP dans
 kern-anon), pas d'édition du draft de mémorandum dans une UI (comme le calendrier
-marketing de Kern-UI), et les besoins #3/#4 (relances, RAG banques).
+marketing de Kern-UI), et le besoin #4 (RAG banques, bloqué sur `kern-memory`).
