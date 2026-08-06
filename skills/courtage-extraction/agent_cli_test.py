@@ -194,6 +194,21 @@ def test_run_interpretation_strips_markdown_fences_before_validating():
     json.loads(out["interpretation_masked"])  # does not raise
 
 
+def test_run_interpretation_tolerates_trailing_prose_after_the_json_object():
+    # Real bug found live (2026-08-06): claude -p sometimes answers with a fenced JSON
+    # block followed by more text, even when told to answer with ONLY the JSON object.
+    real_shape = (
+        '```json\n{\n  "revenus": [],\n  "credits_en_cours": [],\n  "incidents": [],\n'
+        '  "reste_a_vivre": {"montant": null, "methode_calcul": "x", "statut": "y"},\n'
+        '  "pieces_manquantes": []\n}\n```\n\nCeci complète le mémorandum en cours.'
+    )
+    with patch("agent_cli.run_claude", return_value=real_shape):
+        out = m.run_interpretation({"masked_text": "texte masqué"})
+
+    parsed = json.loads(out["interpretation_masked"])
+    assert parsed["pieces_manquantes"] == []
+
+
 def test_run_interpretation_raises_clearly_on_invalid_json():
     with patch("agent_cli.run_claude", return_value="ceci n'est pas du JSON"):
         try:
@@ -201,3 +216,30 @@ def test_run_interpretation_raises_clearly_on_invalid_json():
             assert False, "expected a RuntimeError"
         except RuntimeError as e:
             assert "JSON" in str(e)
+
+
+def test_run_memo_prep_errors_when_notes_entretien_is_missing():
+    # Anti-invention discipline: no client history drafted from nothing — the analyst
+    # must nudge notes_entretien onto the run before approving confirm_extraction.
+    try:
+        m.run_memo_prep({"interpretation": "{}"})
+        assert False, "expected a RuntimeError"
+    except RuntimeError as e:
+        assert "notes_entretien" in str(e)
+
+
+def test_run_memo_prep_combines_the_dossier_and_the_interview_notes():
+    out = m.run_memo_prep({
+        "interpretation": '{"revenus": []}',
+        "notes_entretien": "Client senior, souhaite un prêt viager hypothécaire.",
+    })
+
+    assert '{"revenus": []}' in out["memo_text"]
+    assert "Client senior, souhaite un prêt viager hypothécaire." in out["memo_text"]
+
+
+def test_run_redaction_memo_returns_the_claude_draft():
+    with patch("agent_cli.run_claude", return_value="## Mémorandum\n\nDraft ici."):
+        out = m.run_redaction_memo({"memo_masked_text": "contenu masqué"})
+
+    assert out["memo_draft_masked"] == "## Mémorandum\n\nDraft ici."

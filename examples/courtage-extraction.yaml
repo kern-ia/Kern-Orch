@@ -37,6 +37,33 @@ nodes:
   - id: extraction_a_corriger
     type: tool
     func: noop
+  # Besoin #2 (mémorandum, specs.md) — enchaîné sur le même graphe/état que besoin #1
+  # (choix utilisateur : "un seul flux dossier -> mémo"). notes_entretien arrive via un
+  # nudge sur le run pendant la pause à confirm_extraction, avant l'approbation qui fait
+  # continuer le graphe jusqu'ici. Même discipline de masquage PII que besoin #1, avec ses
+  # propres clés d'état (anonymizeMemoInput/deanonymizeMemoOutput) pour ne jamais écraser
+  # extracted_text/masked_text/interpretation du besoin #1, qui doivent survivre dans
+  # l'état final aux côtés du draft de mémorandum.
+  - id: memo_prep
+    type: agent
+    prompt: Assemble le dossier extrait et les notes d'entretien avant masquage.
+  - id: masquage_memo
+    type: tool
+    func: anonymizeMemoInput
+  - id: redaction_memo
+    type: agent
+    prompt: Rédige le draft de mémorandum de financement à partir du contenu masqué.
+  - id: demasquage_memo
+    type: tool
+    func: deanonymizeMemoOutput
+  - id: confirm_memo
+    type: approval
+  - id: memo_valide
+    type: tool
+    func: noop
+  - id: memo_a_corriger
+    type: tool
+    func: noop
 edges:
   - from: reception
     to: [extraction]
@@ -50,3 +77,15 @@ edges:
     to: [confirm_extraction]
   - from: confirm_extraction
     router: onExtractionDecision
+  - from: extraction_validee
+    to: [memo_prep]
+  - from: memo_prep
+    to: [masquage_memo]
+  - from: masquage_memo
+    to: [redaction_memo]
+  - from: redaction_memo
+    to: [demasquage_memo]
+  - from: demasquage_memo
+    to: [confirm_memo]
+  - from: confirm_memo
+    router: onMemoDecision

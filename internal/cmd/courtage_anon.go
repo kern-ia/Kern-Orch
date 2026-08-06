@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -59,57 +58,75 @@ func newMaskOperators() (map[string]anonymizer.Operator, map[string]string) {
 	return ops, tokenMap
 }
 
-// anonymizePII masks PII in state key "extracted_text" (the pure-OCR output, before any
-// interpretive model sees it — see specs.md "Besoin #1") and writes "masked_text" plus
-// "pii_token_map" (token -> original value). Errors rather than proceeding on an absent
-// input: a missing extracted_text means an upstream node didn't run, not that there is
-// nothing to mask.
-func anonymizePII(ctx context.Context, s *graph.State) error {
-	raw, ok := s.Get("extracted_text")
-	if !ok {
-		return errors.New("courtage: extracted_text manquant")
-	}
-	text, _ := raw.(string)
+// newAnonymizeTool builds a tool that masks PII in state key inputKey and writes
+// textOutKey/mapOutKey (token -> original value). Parameterized by key names so more than
+// one masking pass can run inside the same graph/state without clobbering another pass's
+// keys — besoin #1 (extraction) and besoin #2 (mémorandum, courtage-extraction.yaml) both
+// mask something before a model sees it, and now run inside the SAME state (the user
+// chose a chained single flow for besoin #2), so they need distinct key names. Errors
+// rather than proceeding on an absent input: a missing inputKey means an upstream node
+// didn't run, not that there is nothing to mask.
+func newAnonymizeTool(inputKey, textOutKey, mapOutKey string) func(context.Context, *graph.State) error {
+	return func(ctx context.Context, s *graph.State) error {
+		raw, ok := s.Get(inputKey)
+		if !ok {
+			return fmt.Errorf("courtage: %s manquant", inputKey)
+		}
+		text, _ := raw.(string)
 
-	eng, err := analyzer.New(analyzer.WithRegistry(registry.Default("fr")))
-	if err != nil {
-		return fmt.Errorf("courtage: initialisation de l'analyseur PII : %w", err)
-	}
-	results, err := eng.Analyze(ctx, text, analyzer.Language("fr"))
-	if err != nil {
-		return fmt.Errorf("courtage: analyse PII : %w", err)
-	}
+		eng, err := analyzer.New(analyzer.WithRegistry(registry.Default("fr")))
+		if err != nil {
+			return fmt.Errorf("courtage: initialisation de l'analyseur PII : %w", err)
+		}
+		results, err := eng.Analyze(ctx, text, analyzer.Language("fr"))
+		if err != nil {
+			return fmt.Errorf("courtage: analyse PII : %w", err)
+		}
 
-	ops, tokenMap := newMaskOperators()
-	result, err := anonymizer.New().Anonymize(text, results, ops)
-	if err != nil {
-		return fmt.Errorf("courtage: masquage PII : %w", err)
-	}
+		ops, tokenMap := newMaskOperators()
+		result, err := anonymizer.New().Anonymize(text, results, ops)
+		if err != nil {
+			return fmt.Errorf("courtage: masquage PII : %w", err)
+		}
 
-	s.Set("masked_text", result.Text)
-	s.Set("pii_token_map", tokenMap)
-	return nil
+		s.Set(textOutKey, result.Text)
+		s.Set(mapOutKey, tokenMap)
+		return nil
+	}
 }
 
-// deanonymizePII restores original PII values into state key "interpretation_masked"
-// (the model's masked-text interpretation) by plain string substitution against
-// "pii_token_map", writing the result to "interpretation". A checkpoint round-trip
-// serializes State through JSON, so a map[string]string set by anonymizePII before a
-// Freeze/persist comes back as map[string]interface{} on reload — both shapes are
-// accepted. A missing or empty token map is not an error: it means the extracted text
-// had no PII to mask in the first place.
-func deanonymizePII(_ context.Context, s *graph.State) error {
-	raw, _ := s.Get("interpretation_masked")
-	text, _ := raw.(string)
+// newDeanonymizeTool builds a tool that restores original PII values into state key
+// inputKey (a model's masked-text output) by plain string substitution against mapKey,
+// writing the result to outKey. A checkpoint round-trip serializes State through JSON, so
+// a map[string]string set by the matching anonymize tool before a Freeze/persist comes
+// back as map[string]interface{} on reload — both shapes are accepted (asStringMap). A
+// missing or empty token map is not an error: it means the input text had no PII to mask
+// in the first place.
+func newDeanonymizeTool(inputKey, mapKey, outKey string) func(context.Context, *graph.State) error {
+	return func(_ context.Context, s *graph.State) error {
+		raw, _ := s.Get(inputKey)
+		text, _ := raw.(string)
 
-	tm, _ := s.Get("pii_token_map")
-	for token, original := range asStringMap(tm) {
-		text = strings.ReplaceAll(text, token, original)
+		tm, _ := s.Get(mapKey)
+		for token, original := range asStringMap(tm) {
+			text = strings.ReplaceAll(text, token, original)
+		}
+
+		s.Set(outKey, text)
+		return nil
 	}
-
-	s.Set("interpretation", text)
-	return nil
 }
+
+// anonymizePII/deanonymizePII: besoin #1 (extraction) — see specs.md "Besoin #1".
+var anonymizePII = newAnonymizeTool("extracted_text", "masked_text", "pii_token_map")
+var deanonymizePII = newDeanonymizeTool("interpretation_masked", "pii_token_map", "interpretation")
+
+// anonymizeMemoInput/deanonymizeMemoOutput: besoin #2 (mémorandum) — own key names so
+// this second masking pass never touches besoin #1's extracted_text/masked_text/
+// interpretation, which must survive untouched in the final state (the analyst needs both
+// the structured dossier AND the memo draft, not one overwriting the other).
+var anonymizeMemoInput = newAnonymizeTool("memo_text", "memo_masked_text", "memo_token_map")
+var deanonymizeMemoOutput = newDeanonymizeTool("memo_draft_masked", "memo_token_map", "memo_draft")
 
 func asStringMap(v any) map[string]string {
 	switch m := v.(type) {
