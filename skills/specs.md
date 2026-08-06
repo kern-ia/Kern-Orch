@@ -52,12 +52,14 @@ brique.
 
 ## 2. Agence de courtage (rachat de crédit)
 
-**Statut** : besoins #1 (extraction documentaire), #2 (copilote de mémorandum) et #3
-(relances pièces manquantes) construits et vérifiés en conditions réelles, enchaînés dans
-le même skill/graphe — voir `docs/index/0029-courtage-extraction.md`,
-`docs/index/0030-courtage-memorandum.md` et `docs/index/0031-courtage-relance.md`. Besoin
-#4 (RAG banques) pas commencé, bloqué sur `kern-memory`. Besoin source original :
-`agence_courtage.html` (ce dossier) —
+**Statut** : les 4 besoins court terme sont construits et vérifiés en conditions réelles.
+#1 (extraction documentaire), #2 (copilote de mémorandum) et #3 (relances pièces
+manquantes) sont enchaînés dans le même skill/graphe (`courtage-extraction`) — voir
+`docs/index/0029-courtage-extraction.md`, `docs/index/0030-courtage-memorandum.md` et
+`docs/index/0031-courtage-relance.md`. #4 (RAG banques) est un skill séparé
+(`courtage-banques`, agent conversationnel libre) — voir
+`docs/index/0032-courtage-banques.md`. Besoin source original : `agence_courtage.html`
+(ce dossier) —
 spécification "Architecture & Workflows Agentiques : Rachat de Crédit", 4 swarms
 d'agents, superviseur central, bus Pub/Sub, mémoire partagée chiffrée.
 
@@ -126,6 +128,39 @@ d'agents, superviseur central, bus Pub/Sub, mémoire partagée chiffrée.
 - Aucun point ouvert connu. Le canal reste Telegram interne ; si le besoin évolue vers un
   vrai envoi client (SMS/email), c'est un chantier à part (modèle de contact client
   inexistant aujourd'hui).
+
+### Besoin #4 — RAG critères banques : fait, vérifié en réel (2026-08-07)
+- Skill SÉPARÉ `courtage-banques` (pas un nœud de `courtage-extraction`) — agent
+  conversationnel libre, pas rattaché à un dossier précis, conforme au besoin prospect
+  original ("agent conversationnel interne interrogé en langage naturel").
+- Un seul nœud : interroge `kern-memory` (EPIC-13 phase 1, `POST /api/v1/memory/query`),
+  synthétise une réponse sourcée avec `claude -p` à partir UNIQUEMENT des extraits
+  retournés — jamais de connaissances générales du modèle.
+- Lecture seule stricte : n'écrit jamais dans `kern-memory`. Aucun critère bancaire n'est
+  fabriqué par le skill ni halluciné par Claude.
+- Vérifié en réel avec deux critères de test écrits dans `kern-memory` : la question exacte
+  du prospect a produit une réponse sourcée, correcte sur un cas contradictoire (une banque
+  accepte, une refuse), et le modèle a spontanément signalé que les données étaient des
+  données de test sans qu'on le lui demande.
+
+### Reste à faire — besoin #4
+- **Base de connaissances vide en production** — aucun vrai critère bancaire n'a été
+  écrit dans `kern-memory`. À fournir par l'équipe AvelFinances et écrire via
+  `POST /api/v1/memory/write`. Le skill ne répond utilement à rien tant que ce n'est pas
+  fait (comportement honnête vérifié : dit "aucune information disponible" plutôt que
+  d'inventer).
+- Pas de mécanisme de mise à jour/expiration des critères (ils "évoluent souvent" selon le
+  besoin prospect) — écriture manuelle uniquement pour l'instant.
+
+---
+
+## Découpage court terme : les 4 besoins sont clos (2026-08-07)
+
+Les besoins #1 à #4 de l'agence de courtage (extraction, mémorandum, relances, RAG
+banques) sont tous construits et vérifiés en conditions réelles. Le besoin #5 (soumission
+bancaire automatisée + conformité réglementaire) reste explicitement hors scope court
+terme (voir le tableau de découpage global plus haut) — à rouvrir seulement si le prospect
+le demande.
 
 ### ⚠️ À traduire avant de construire, pas à copier tel quel
 Le document source décrit une architecture générique (Redis Vault, pgvector chiffré,
