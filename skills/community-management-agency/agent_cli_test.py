@@ -47,6 +47,12 @@ def test_telegram_platform_detected_through_markdown_bold():
     assert m.TELEGRAM_PLATFORM_RE.search("**Plateforme(s)** : Telegram uniquement.")
 
 
+def test_telegram_platform_detected_without_the_plural_s():
+    # Real bug, found live: strategiste sometimes writes "Plateforme :" (singular), not
+    # always "Plateforme(s) :" — the original regex required the literal "(s)".
+    assert m.TELEGRAM_PLATFORM_RE.search("Plateforme : Telegram (seule pertinente ici).")
+
+
 def test_send_telegram_returns_empty_when_unconfigured():
     with patch.dict("os.environ", {}, clear=True):
         assert m.send_telegram("hello") == ""
@@ -155,6 +161,10 @@ def test_x_platform_detected_as_the_standalone_letter():
 
 def test_x_platform_detected_via_twitter():
     assert m.X_PLATFORM_RE.search("Plateforme(s) : Twitter")
+
+
+def test_x_platform_detected_without_the_plural_s():
+    assert m.X_PLATFORM_RE.search("Plateforme : X (seule pertinente ici).")
 
 
 def test_x_platform_not_matched_inside_an_unrelated_word():
