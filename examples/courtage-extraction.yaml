@@ -1,0 +1,52 @@
+# courtage-extraction : extraction documentaire pour un dossier de rachat de crédit
+# (POST /api/v1/dispatch {"skill":"courtage-extraction","text":"/chemin/vers/dossier.pdf"}
+# — le texte du chat EST le chemin du document, même mécanisme que
+# community-management-agency: "message" (mailbox.Nudge côté kern-orch, internal/cmd/
+# serve.go) devient l'entrée du premier nœud. Voir Kern-Orch/skills/specs.md, "Ingestion
+# des documents" : seul le canal chemin/dossier est câblé pour l'instant, UI upload et
+# réception Telegram restent à construire).
+#
+# L'ordre des étapes est l'enjeu réel (specs.md, "Besoin #1") : le texte brut extrait par
+# OCR (reception -> extraction) passe par kern-anon (masquage_pii) AVANT que le nœud
+# d'interprétation (un vrai modèle de raisonnement) ne le voie. La validation humaine
+# (confirm_extraction) porte sur le résultat FINAL, démasqué — c'est la seule étape où les
+# données réelles redeviennent visibles, par un humain qui doit de toute façon les
+# valider, pas envoyées en clair à un tiers.
+entry: reception
+nodes:
+  - id: reception
+    type: agent
+    prompt: Vérifie que le document fourni existe et est accessible.
+  - id: extraction
+    type: agent
+    prompt: Découpe le document par page et en extrait le texte brut (OCR si nécessaire).
+  - id: masquage_pii
+    type: tool
+    func: anonymizePII
+  - id: interpretation
+    type: agent
+    prompt: Analyse le texte masqué et produit le résultat structuré (revenus, crédits, reste à vivre).
+  - id: demasquage_pii
+    type: tool
+    func: deanonymizePII
+  - id: confirm_extraction
+    type: approval
+  - id: extraction_validee
+    type: tool
+    func: noop
+  - id: extraction_a_corriger
+    type: tool
+    func: noop
+edges:
+  - from: reception
+    to: [extraction]
+  - from: extraction
+    to: [masquage_pii]
+  - from: masquage_pii
+    to: [interpretation]
+  - from: interpretation
+    to: [demasquage_pii]
+  - from: demasquage_pii
+    to: [confirm_extraction]
+  - from: confirm_extraction
+    router: onExtractionDecision
