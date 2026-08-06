@@ -125,6 +125,53 @@ func TestDeanonymizePIIHandlesTokenMapAfterJSONRoundTrip(t *testing.T) {
 	}
 }
 
+// anonymizeMemoInput/deanonymizeMemoOutput are the same masking logic under distinct
+// state keys (memo_text/memo_masked_text/memo_token_map, memo_draft_masked/memo_draft) —
+// besoin #2 (mémorandum) reuses the extraction step's sovereignty discipline without
+// clobbering extraction's own extracted_text/masked_text/interpretation keys, since both
+// phases now run inside the same graph/state (see examples/courtage-extraction.yaml).
+func TestAnonymizeMemoInputUsesItsOwnStateKeys(t *testing.T) {
+	s := graph.NewState()
+	s.Set("extracted_text", "ne doit pas être touché")
+	s.Set("memo_text", "Contact client : jean.dupont@example.com")
+
+	if err := anonymizeMemoInput(context.Background(), s); err != nil {
+		t.Fatalf("anonymizeMemoInput: %v", err)
+	}
+
+	extracted, _ := s.Get("extracted_text")
+	if extracted.(string) != "ne doit pas être touché" {
+		t.Errorf("anonymizeMemoInput must not touch extracted_text, got %q", extracted)
+	}
+	masked, ok := s.Get("memo_masked_text")
+	if !ok || strings.Contains(masked.(string), "jean.dupont@example.com") {
+		t.Fatalf("memo_masked_text not set or still contains the raw email: %v", masked)
+	}
+	if _, ok := s.Get("masked_text"); ok {
+		t.Error("anonymizeMemoInput must not write the extraction step's masked_text key")
+	}
+}
+
+func TestDeanonymizeMemoOutputUsesItsOwnStateKeys(t *testing.T) {
+	s := graph.NewState()
+	s.Set("interpretation", "ne doit pas être touché")
+	s.Set("memo_draft_masked", "Contact : <EMAIL_1>")
+	s.Set("memo_token_map", map[string]string{"<EMAIL_1>": "jean.dupont@example.com"})
+
+	if err := deanonymizeMemoOutput(context.Background(), s); err != nil {
+		t.Fatalf("deanonymizeMemoOutput: %v", err)
+	}
+
+	draft, ok := s.Get("memo_draft")
+	if !ok || draft.(string) != "Contact : jean.dupont@example.com" {
+		t.Fatalf("memo_draft not restored correctly: %v", draft)
+	}
+	interp, _ := s.Get("interpretation")
+	if interp.(string) != "ne doit pas être touché" {
+		t.Errorf("deanonymizeMemoOutput must not touch interpretation, got %q", interp)
+	}
+}
+
 func TestDeanonymizePIIIsSafeWithoutATokenMap(t *testing.T) {
 	s := graph.NewState()
 	s.Set("interpretation_masked", "Rien à démasquer ici.")

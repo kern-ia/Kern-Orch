@@ -52,9 +52,10 @@ brique.
 
 ## 2. Agence de courtage (rachat de crédit)
 
-**Statut** : besoin #1 (extraction documentaire) construit et vérifié en conditions
-réelles — voir `docs/index/0029-courtage-extraction.md` pour le détail complet. Besoins
-#2 à #4 pas commencés. Besoin source original : `agence_courtage.html` (ce dossier) —
+**Statut** : besoins #1 (extraction documentaire) et #2 (copilote de mémorandum)
+construits et vérifiés en conditions réelles, enchaînés dans le même skill/graphe — voir
+`docs/index/0029-courtage-extraction.md` et `docs/index/0030-courtage-memorandum.md`.
+Besoins #3/#4 pas commencés. Besoin source original : `agence_courtage.html` (ce dossier) —
 spécification "Architecture & Workflows Agentiques : Rachat de Crédit", 4 swarms
 d'agents, superviseur central, bus Pub/Sub, mémoire partagée chiffrée.
 
@@ -85,6 +86,27 @@ d'agents, superviseur central, bus Pub/Sub, mémoire partagée chiffrée.
   fixe (IBAN, téléphone FR, email, NIR, SIREN/SIRET, carte bancaire...), aucun moteur
   NLP/ONNX n'est branché. Un nom en texte libre ("Jean Dupont") n'est pas masqué
   aujourd'hui — documenté explicitement dans le SKILL.md du skill, pas un oubli silencieux.
+
+### Besoin #2 — Copilote de mémorandum : fait, vérifié en réel (2026-08-06)
+- Enchaîné dans le MÊME graphe/run que le besoin #1 (choix utilisateur : kern-orch n'a pas
+  de partage d'état entre runs, donc "un seul flux" veut dire un seul run).
+  `extraction_validee → memo_prep → masquage_memo → redaction_memo → demasquage_memo →
+  confirm_memo`.
+- Les notes du premier entretien arrivent via `nudge` pendant la pause à
+  `confirm_extraction` — pas de nouveau mécanisme, réutilise `mailbox.Nudge` existant.
+  Erreur claire si absentes (pas d'historique client inventé).
+- Même discipline de masquage PII que le besoin #1, clés d'état dédiées
+  (`anonymizeMemoInput`/`deanonymizeMemoOutput`) pour ne jamais écraser l'état du besoin
+  #1 — les deux (dossier structuré + draft de mémo) coexistent dans l'état final.
+- **Bug réel trouvé en direct** : `claude -p` a répondu avec un JSON valide suivi de texte
+  libre malgré l'instruction "réponds UNIQUEMENT avec un objet JSON" — `json.loads` sur
+  toute la chaîne échouait ("Extra data"). Corrigé avec une extraction tolérante
+  (`json.JSONDecoder().raw_decode` sur le premier `{`, ignore ce qui suit) — même leçon
+  générique que le bug de détection de plateforme Telegram/X.
+
+### Reste à faire — besoin #2
+- Pas d'édition du draft de mémorandum dans une UI (comme le calendrier marketing de
+  Kern-UI) — aujourd'hui uniquement consultable via l'état du run.
 
 ### ⚠️ À traduire avant de construire, pas à copier tel quel
 Le document source décrit une architecture générique (Redis Vault, pgvector chiffré,

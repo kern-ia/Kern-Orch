@@ -52,6 +52,21 @@ def strip_json_fence(text: str) -> str:
     return JSON_FENCE_RE.sub("", text.strip()).strip()
 
 
+def extract_json_object(text: str) -> str:
+    """Locates the first well-formed JSON object in text rather than assuming the whole
+    (fence-stripped) string is pure JSON — found live (2026-08-06, run_interpretation):
+    claude -p answered with a fenced JSON block followed by trailing prose even though the
+    prompt says "réponds UNIQUEMENT avec un objet JSON". Same generic lesson as the
+    Telegram/X platform-detection regex bugs: never assume a single observed model output
+    shape is the only one that occurs."""
+    cleaned = strip_json_fence(text)
+    start = cleaned.find("{")
+    if start == -1:
+        raise ValueError("aucun objet JSON trouvé dans la réponse")
+    obj, _ = json.JSONDecoder().raw_decode(cleaned[start:])
+    return json.dumps(obj, ensure_ascii=False)
+
+
 def emit_result(output: dict) -> None:
     print(json.dumps({"type": "result", "output": output}), flush=True)
 
@@ -216,10 +231,9 @@ def run_interpretation(data: dict) -> dict:
     masked = data.get("masked_text", "")
     prompt = f"{INTERPRETATION_PROMPT}\n\n--- TEXTE (PII masqué) ---\n{masked}"
     raw = run_claude(prompt)
-    cleaned = strip_json_fence(raw)
     try:
-        json.loads(cleaned)
-    except json.JSONDecodeError as e:
+        cleaned = extract_json_object(raw)
+    except (ValueError, json.JSONDecodeError) as e:
         raise RuntimeError(f"réponse non-JSON du modèle : {e}\n{raw[:300]}") from e
 
     return {
@@ -228,10 +242,65 @@ def run_interpretation(data: dict) -> dict:
     }
 
 
+MEMO_PROMPT = """Tu es un analyste crédit senior chez un courtier en rachat de crédit /
+prêt viager hypothécaire. On te donne un dossier extrait (JSON structuré : revenus,
+crédits en cours, reste à vivre, pièces manquantes) et des notes de premier entretien,
+avec les données personnelles remplacées par des jetons (<IBAN_1>, <EMAIL_1>, <PII_1>...)
+: NE JAMAIS inventer de valeur pour ces jetons, recopie-les tels quels partout où
+l'information originale apparaîtrait.
+
+Rédige un DRAFT de Mémorandum de Financement destiné à être défendu auprès d'un prêteur,
+structuré ainsi :
+1. Situation patrimoniale et historique (synthèse des notes d'entretien)
+2. Besoin de financement exprimé par le client
+3. Analyse des revenus et charges (reprend le dossier extrait, cite le statut
+   "confirmé"/"à vérifier" de chaque donnée — jamais une affirmation sans preuve)
+4. Points de vigilance / pièces manquantes
+5. Recommandation préliminaire (à affiner par l'analyste, jamais présentée comme
+   définitive)
+
+Ton professionnel, factuel, jamais promotionnel. Toute donnée marquée "à vérifier" dans
+le dossier DOIT rester présentée comme non confirmée dans le mémorandum."""
+
+
+def run_memo_prep(data: dict) -> dict:
+    """Combines besoin #1's demasked dossier with the analyst's interview notes before
+    masking — see specs.md "Besoin #2". notes_entretien is expected to arrive via
+    POST /api/v1/runs/{id}/nudge {"key":"notes_entretien","value":"..."} while the run is
+    paused at confirm_extraction (the analyst's natural moment to add context before
+    validating the extraction and letting the graph continue into the memo)."""
+    notes = (data.get("notes_entretien") or "").strip()
+    if not notes:
+        raise RuntimeError(
+            "notes_entretien manquant : nudge cette clé sur le run avant d'approuver "
+            "confirm_extraction (POST /api/v1/runs/{id}/nudge)."
+        )
+    dossier = data.get("interpretation", "")
+    combined = (
+        "--- DOSSIER EXTRAIT (JSON) ---\n"
+        f"{dossier}\n\n"
+        "--- NOTES DU PREMIER ENTRETIEN ---\n"
+        f"{notes}"
+    )
+    return {"memo_text": combined}
+
+
+def run_redaction_memo(data: dict) -> dict:
+    masked = data.get("memo_masked_text", "")
+    prompt = f"{MEMO_PROMPT}\n\n--- CONTENU (PII masqué) ---\n{masked}"
+    draft = run_claude(prompt)
+    return {
+        "memo_draft_masked": draft,
+        "display:redaction_memo": "Draft de mémorandum généré (données encore masquées).",
+    }
+
+
 NODE_HANDLERS = {
     "reception": run_reception,
     "extraction": run_extraction,
     "interpretation": run_interpretation,
+    "memo_prep": run_memo_prep,
+    "redaction_memo": run_redaction_memo,
 }
 
 

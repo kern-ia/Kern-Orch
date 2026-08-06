@@ -133,6 +133,13 @@ func builtinRegistry(runner graph.AgentRunner, cfg config.Config) *topology.Regi
 	reg.Tool("deanonymizePII", deanonymizePII)
 	reg.Router("onExtractionDecision", decisionRouter("confirm_extraction",
 		[]string{"extraction_validee"}, []string{"extraction_a_corriger"}))
+	// courtage-extraction besoin #2 (mémorandum) — chained onto the same graph/state as
+	// besoin #1 (user's choice: "un seul flux dossier -> mémo"), own masking pass so it
+	// never clobbers besoin #1's own state keys. See internal/cmd/courtage_anon.go.
+	reg.Tool("anonymizeMemoInput", anonymizeMemoInput)
+	reg.Tool("deanonymizeMemoOutput", deanonymizeMemoOutput)
+	reg.Router("onMemoDecision", decisionRouter("confirm_memo",
+		[]string{"memo_valide"}, []string{"memo_a_corriger"}))
 	return reg
 }
 
