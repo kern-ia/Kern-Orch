@@ -121,6 +121,10 @@ func builtinRegistry(runner graph.AgentRunner, cfg config.Config) *topology.Regi
 		[]string{"redacteur"}, []string{"strategie_refusee"}))
 	reg.Router("onPublicationDecision", decisionRouter("confirm_publication",
 		[]string{"publieur"}, []string{"refus_publication"}))
+	// community-management-agency-auto (internal/cmd/comm_auto.go) — a separate graph,
+	// additive to the one above. See that file for the routing rule.
+	reg.Router("onAutoPublishRoute", onAutoPublishRoute)
+	reg.Tool("autoApprove", autoApproveTool)
 	return reg
 }
 

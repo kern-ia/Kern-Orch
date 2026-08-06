@@ -31,3 +31,19 @@ func TestCommunityManagementAgencyGraphLoadsAndValidates(t *testing.T) {
 		t.Fatalf("topology.Load: %v", err)
 	}
 }
+
+func TestCommunityManagementAgencyAutoGraphLoadsAndValidates(t *testing.T) {
+	reg := builtinRegistry(&agentrunner.Stub{}, config.Config{})
+	reg.OnApproval(func(context.Context, string) (graph.Decision, error) {
+		return graph.Refused, nil
+	})
+
+	data, err := os.ReadFile("../../examples/community-management-agency-auto.yaml")
+	if err != nil {
+		t.Fatalf("read graph: %v", err)
+	}
+
+	if _, err := topology.Load(data, reg); err != nil {
+		t.Fatalf("topology.Load: %v", err)
+	}
+}

@@ -112,7 +112,7 @@ reste inchangé : "Publier sur Telegram le <date> : <référence au texte>"."""
 # une analyse fine, un mot-clé suffit ici : le geste qui déclenche vraiment l'envoi reste
 # la validation humaine de confirm_publication, cette détection ne fait que choisir QUEL
 # connecteur essayer une fois l'accord donné, jamais si on publie ou non.
-TELEGRAM_PLATFORM_RE = re.compile(r"plateforme\(s\)[*_\s]*:.*telegram", re.IGNORECASE)
+TELEGRAM_PLATFORM_RE = re.compile(r"plateforme(\(s\))?[*_\s]*:.*telegram", re.IGNORECASE)
 
 
 def send_telegram(text: str) -> str:
@@ -158,7 +158,7 @@ message strictement inférieur à 280 caractères (limite de la plateforme, non 
 compte les caractères), un seul post, pas de section "Objet". Le squelette de plan reste
 inchangé : "Publier sur X le <date> : <référence au texte>"."""
 
-X_PLATFORM_RE = re.compile(r"(?i:plateforme\(s\))[*_\s]*:[^\n]*\b(X|[Tt]witter)\b")
+X_PLATFORM_RE = re.compile(r"(?i:plateforme(\(s\))?)[*_\s]*:[^\n]*\b(X|[Tt]witter)\b")
 
 # Newsletter/blog (2026-08-06) : format long, à l'opposé des canaux courts ci-dessus —
 # aucun connecteur réel (pas de plateforme d'emailing ni de CMS branché), reste en mode
