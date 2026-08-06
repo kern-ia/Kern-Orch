@@ -64,6 +64,21 @@ nodes:
   - id: memo_a_corriger
     type: tool
     func: noop
+  # Besoin #3 (relances pièces manquantes, specs.md) — notifie l'ÉQUIPE INTERNE (canal
+  # Telegram déjà configuré, tool "notify"), jamais le client directement : aucun modèle
+  # client -> chat_id n'existe, et un bot Telegram ne peut pas contacter un utilisateur qui
+  # ne lui a jamais parlé en premier. onRelanceNeeded (internal/cmd/courtage_relance.go)
+  # combine le fan-out inconditionnel vers memo_prep et le branchement conditionnel ici, un
+  # graphe kern-orch n'autorisant qu'un seul routeur par nœud source.
+  - id: relance_prep
+    type: agent
+    prompt: Formate le message de relance interne à partir des pièces manquantes du dossier.
+  - id: relance_notify
+    type: tool
+    func: notify
+  - id: relance_non_necessaire
+    type: tool
+    func: noop
 edges:
   - from: reception
     to: [extraction]
@@ -78,9 +93,11 @@ edges:
   - from: confirm_extraction
     router: onExtractionDecision
   - from: extraction_validee
-    to: [memo_prep]
+    router: onRelanceNeeded
   - from: memo_prep
     to: [masquage_memo]
+  - from: relance_prep
+    to: [relance_notify]
   - from: masquage_memo
     to: [redaction_memo]
   - from: redaction_memo

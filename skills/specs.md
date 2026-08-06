@@ -52,10 +52,12 @@ brique.
 
 ## 2. Agence de courtage (rachat de crédit)
 
-**Statut** : besoins #1 (extraction documentaire) et #2 (copilote de mémorandum)
-construits et vérifiés en conditions réelles, enchaînés dans le même skill/graphe — voir
-`docs/index/0029-courtage-extraction.md` et `docs/index/0030-courtage-memorandum.md`.
-Besoins #3/#4 pas commencés. Besoin source original : `agence_courtage.html` (ce dossier) —
+**Statut** : besoins #1 (extraction documentaire), #2 (copilote de mémorandum) et #3
+(relances pièces manquantes) construits et vérifiés en conditions réelles, enchaînés dans
+le même skill/graphe — voir `docs/index/0029-courtage-extraction.md`,
+`docs/index/0030-courtage-memorandum.md` et `docs/index/0031-courtage-relance.md`. Besoin
+#4 (RAG banques) pas commencé, bloqué sur `kern-memory`. Besoin source original :
+`agence_courtage.html` (ce dossier) —
 spécification "Architecture & Workflows Agentiques : Rachat de Crédit", 4 swarms
 d'agents, superviseur central, bus Pub/Sub, mémoire partagée chiffrée.
 
@@ -107,6 +109,23 @@ d'agents, superviseur central, bus Pub/Sub, mémoire partagée chiffrée.
 ### Reste à faire — besoin #2
 - Pas d'édition du draft de mémorandum dans une UI (comme le calendrier marketing de
   Kern-UI) — aujourd'hui uniquement consultable via l'état du run.
+
+### Besoin #3 — Relances pièces manquantes : fait, vérifié en réel (2026-08-06)
+- Notifie l'ÉQUIPE INTERNE (Telegram, `notify` déjà construit), jamais le client
+  directement — décision utilisateur, cadrée avant de coder (pas de modèle
+  client → coordonnées, contrainte Telegram sur les conversations non initiées côté
+  utilisateur). L'IA rédige le message, l'humain le transmet.
+- En parallèle du mémorandum (pas séquentiel) : `extraction_validee → [onRelanceNeeded]`
+  fan-out inconditionnel vers `memo_prep` + branchement conditionnel vers
+  `relance_prep`/`relance_non_necessaire` selon `pieces_manquantes` du dossier extrait.
+- Pas de validation humaine avant l'envoi (contrairement à la publication de
+  community-management-agency) — notification interne, pas une action visible du client.
+- Vrai envoi Telegram déclenché et vérifié (run terminé sans erreur).
+
+### Reste à faire — besoin #3
+- Aucun point ouvert connu. Le canal reste Telegram interne ; si le besoin évolue vers un
+  vrai envoi client (SMS/email), c'est un chantier à part (modèle de contact client
+  inexistant aujourd'hui).
 
 ### ⚠️ À traduire avant de construire, pas à copier tel quel
 Le document source décrit une architecture générique (Redis Vault, pgvector chiffré,

@@ -295,12 +295,46 @@ def run_redaction_memo(data: dict) -> dict:
     }
 
 
+def run_relance_prep(data: dict) -> dict:
+    """Formats state["message"] (the fixed key notify's Go tool reads,
+    internal/notify/tool.go) for besoin #3 — a reminder to the INTERNAL team
+    (Cassandra/Auriane), never a direct client message (see specs.md, cadrage
+    2026-08-06 : pas de modèle client -> chat_id, et Telegram ne peut pas contacter un
+    utilisateur qui n'a pas parlé au bot en premier). Never invents a missing piece: an
+    unparseable dossier still produces a safe, generic message rather than a fabricated
+    list."""
+    document = data.get("document_path", "")
+    name = Path(document).name if document else "le dossier"
+
+    pieces: list[str] = []
+    try:
+        dossier = json.loads(data.get("interpretation", "") or "{}")
+        pieces = dossier.get("pieces_manquantes") or []
+    except json.JSONDecodeError:
+        pieces = []
+
+    if pieces:
+        lignes = "\n".join(f"- {p}" for p in pieces)
+        message = (
+            f"🔔 Pièces manquantes — {name}\n\n{lignes}\n\n"
+            "Merci de relancer le client pour ces éléments."
+        )
+    else:
+        message = (
+            f"🔔 Dossier {name} : le dossier extrait n'a pas pu être lu automatiquement, "
+            "vérifier manuellement les pièces manquantes avant de relancer le client."
+        )
+
+    return {"message": message, "display:relance_prep": message}
+
+
 NODE_HANDLERS = {
     "reception": run_reception,
     "extraction": run_extraction,
     "interpretation": run_interpretation,
     "memo_prep": run_memo_prep,
     "redaction_memo": run_redaction_memo,
+    "relance_prep": run_relance_prep,
 }
 
 

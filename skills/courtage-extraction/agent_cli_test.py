@@ -243,3 +243,23 @@ def test_run_redaction_memo_returns_the_claude_draft():
         out = m.run_redaction_memo({"memo_masked_text": "contenu masqué"})
 
     assert out["memo_draft_masked"] == "## Mémorandum\n\nDraft ici."
+
+
+def test_run_relance_prep_lists_the_missing_pieces_in_the_message():
+    out = m.run_relance_prep({
+        "document_path": "/tmp/dossier_dupont.pdf",
+        "interpretation": json.dumps({
+            "pieces_manquantes": ["avis d'imposition N-1", "3e bulletin de salaire"],
+        }),
+    })
+
+    assert "avis d'imposition N-1" in out["message"]
+    assert "3e bulletin de salaire" in out["message"]
+    assert "dossier_dupont.pdf" in out["message"]
+
+
+def test_run_relance_prep_never_invents_pieces_when_interpretation_is_unparseable():
+    out = m.run_relance_prep({"document_path": "/tmp/x.pdf", "interpretation": "pas du JSON"})
+
+    assert out["message"]  # still produces a safe, generic message
+    assert "avis d'imposition" not in out["message"]  # nothing invented
