@@ -102,7 +102,14 @@ func newAnonymizeTool(inputKey, textOutKey, mapOutKey string) func(context.Conte
 // back as map[string]interface{} on reload — both shapes are accepted (asStringMap). A
 // missing or empty token map is not an error: it means the input text had no PII to mask
 // in the first place.
-func newDeanonymizeTool(inputKey, mapKey, outKey string) func(context.Context, *graph.State) error {
+//
+// displayKey, when non-empty, also writes the result under that key — the convention
+// Kern-UI's hive panel reads to show a node's output (any node can opt in by writing
+// "display:<nodeId>", see Kern-UI/web/src/runs/HiveGraph.tsx). A Go tool node has no
+// nodeID at runtime (ToolFunc's signature carries none), unlike a Python agent node's own
+// handler; the node id each of these tools runs at is fixed by construction (one graph,
+// one call site each), so baking it in here is accurate, not a guess.
+func newDeanonymizeTool(inputKey, mapKey, outKey, displayKey string) func(context.Context, *graph.State) error {
 	return func(_ context.Context, s *graph.State) error {
 		raw, _ := s.Get(inputKey)
 		text, _ := raw.(string)
@@ -113,20 +120,28 @@ func newDeanonymizeTool(inputKey, mapKey, outKey string) func(context.Context, *
 		}
 
 		s.Set(outKey, text)
+		if displayKey != "" {
+			s.Set(displayKey, text)
+		}
 		return nil
 	}
 }
 
-// anonymizePII/deanonymizePII: besoin #1 (extraction) — see specs.md "Besoin #1".
+// anonymizePII/deanonymizePII: besoin #1 (extraction) — see specs.md "Besoin #1". No
+// display key: the restored dossier is meant to be reviewed at confirm_extraction through
+// its own approval context, not surfaced through the generic hive convention.
 var anonymizePII = newAnonymizeTool("extracted_text", "masked_text", "pii_token_map")
-var deanonymizePII = newDeanonymizeTool("interpretation_masked", "pii_token_map", "interpretation")
+var deanonymizePII = newDeanonymizeTool("interpretation_masked", "pii_token_map", "interpretation", "")
 
 // anonymizeMemoInput/deanonymizeMemoOutput: besoin #2 (mémorandum) — own key names so
 // this second masking pass never touches besoin #1's extracted_text/masked_text/
 // interpretation, which must survive untouched in the final state (the analyst needs both
 // the structured dossier AND the memo draft, not one overwriting the other).
+// deanonymizeMemoOutput runs at graph node "demasquage_memo" (examples/courtage-extraction.yaml)
+// — writing display:demasquage_memo is what makes the final memo actually visible in
+// Kern-UI instead of only reachable through the raw run state.
 var anonymizeMemoInput = newAnonymizeTool("memo_text", "memo_masked_text", "memo_token_map")
-var deanonymizeMemoOutput = newDeanonymizeTool("memo_draft_masked", "memo_token_map", "memo_draft")
+var deanonymizeMemoOutput = newDeanonymizeTool("memo_draft_masked", "memo_token_map", "memo_draft", "display:demasquage_memo")
 
 func asStringMap(v any) map[string]string {
 	switch m := v.(type) {
