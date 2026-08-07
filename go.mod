@@ -3,10 +3,12 @@ module github.com/yoann/kern-orch
 go 1.26.5
 
 require (
-	github.com/YoLaub/PresidioGo v0.0.0-00010101000000-000000000000
+	github.com/YoLaub/PresidioGo v0.0.0-20260717123901-6090b99c738f
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.54.0
 )
+
+require github.com/yalue/onnxruntime_go v1.31.0 // indirect
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

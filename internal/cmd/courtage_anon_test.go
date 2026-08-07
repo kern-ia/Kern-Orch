@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/YoLaub/PresidioGo/pii"
 	"github.com/yoann/kern-orch/internal/graph"
 )
 
@@ -206,6 +207,37 @@ func TestDeanonymizePIIDoesNotWriteADisplayKey(t *testing.T) {
 
 	if _, ok := s.Get("display:demasquage_pii"); ok {
 		t.Error("deanonymizePII must not write a display key (not requested)")
+	}
+}
+
+// filterNerScope keeps only PERSON among NER-derived entity types — LOCATION/ORGANIZATION
+// are legitimate business context (a bank's name, a town) that the interpreting model
+// still needs to see; only a person's identity is what "détection de noms propres" asked
+// to mask. Regex-based entity types (IBAN_CODE, EMAIL_ADDRESS, ...) are untouched either
+// way — this filter only ever removes LOCATION/ORGANIZATION.
+func TestFilterNerScopeKeepsPersonAndRegexEntitiesButDropsLocationAndOrganization(t *testing.T) {
+	in := []pii.Result{
+		{EntityType: "PERSON", Start: 0, End: 4},
+		{EntityType: "LOCATION", Start: 5, End: 9},
+		{EntityType: "ORGANIZATION", Start: 10, End: 14},
+		{EntityType: "IBAN_CODE", Start: 15, End: 20},
+	}
+
+	got := filterNerScope(in)
+
+	var types []string
+	for _, r := range got {
+		types = append(types, r.EntityType)
+	}
+	if len(types) != 2 || types[0] != "PERSON" || types[1] != "IBAN_CODE" {
+		t.Errorf("got %v, want [PERSON IBAN_CODE]", types)
+	}
+}
+
+func TestFilterNerScopeHandlesAnEmptyInput(t *testing.T) {
+	got := filterNerScope(nil)
+	if len(got) != 0 {
+		t.Errorf("got %v, want empty", got)
 	}
 }
 
