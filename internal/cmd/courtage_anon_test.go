@@ -172,6 +172,43 @@ func TestDeanonymizeMemoOutputUsesItsOwnStateKeys(t *testing.T) {
 	}
 }
 
+// Kern-UI's hive panel shows a node's output when state carries "display:<nodeId>" (any
+// node can opt in — see Kern-UI/web/src/runs/HiveGraph.tsx, outputOf). demasquage_memo is
+// the graph node id that runs deanonymizeMemoOutput (examples/courtage-extraction.yaml) —
+// writing "display:demasquage_memo" here is what makes the final, demasked memorandum
+// actually visible in the UI instead of only reachable through the raw run state.
+func TestDeanonymizeMemoOutputWritesTheHiveDisplayKey(t *testing.T) {
+	s := graph.NewState()
+	s.Set("memo_draft_masked", "Contenu du mémorandum.")
+	s.Set("memo_token_map", map[string]string{})
+
+	if err := deanonymizeMemoOutput(context.Background(), s); err != nil {
+		t.Fatalf("deanonymizeMemoOutput: %v", err)
+	}
+
+	display, ok := s.Get("display:demasquage_memo")
+	if !ok || display.(string) != "Contenu du mémorandum." {
+		t.Fatalf("display:demasquage_memo not set correctly: %v", display)
+	}
+}
+
+// deanonymizePII (besoin #1) deliberately gets NO display key here — the dossier it
+// restores is meant to be reviewed at confirm_extraction via its own approval context,
+// not surfaced through this generic hive convention; only besoin #2's memo was asked for.
+func TestDeanonymizePIIDoesNotWriteADisplayKey(t *testing.T) {
+	s := graph.NewState()
+	s.Set("interpretation_masked", "{}")
+	s.Set("pii_token_map", map[string]string{})
+
+	if err := deanonymizePII(context.Background(), s); err != nil {
+		t.Fatalf("deanonymizePII: %v", err)
+	}
+
+	if _, ok := s.Get("display:demasquage_pii"); ok {
+		t.Error("deanonymizePII must not write a display key (not requested)")
+	}
+}
+
 func TestDeanonymizePIIIsSafeWithoutATokenMap(t *testing.T) {
 	s := graph.NewState()
 	s.Set("interpretation_masked", "Rien à démasquer ici.")

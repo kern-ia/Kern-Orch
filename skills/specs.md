@@ -109,8 +109,11 @@ d'agents, superviseur central, bus Pub/Sub, mémoire partagée chiffrée.
   générique que le bug de détection de plateforme Telegram/X.
 
 ### Reste à faire — besoin #2
-- Pas d'édition du draft de mémorandum dans une UI (comme le calendrier marketing de
-  Kern-UI) — aujourd'hui uniquement consultable via l'état du run.
+- ~~Pas d'affichage du draft de mémorandum dans l'UI~~ — **fait le 2026-08-07** :
+  `demasquage_memo` écrit `display:demasquage_memo`, visible dans le panneau de la Ruche.
+  Voir `docs/index/0033-courtage-memo-display.md`. Reste ouvert : édition/copie du texte
+  (comme le calendrier marketing de Kern-UI) — non demandé pour l'instant, juste
+  consultable.
 
 ### Besoin #3 — Relances pièces manquantes : fait, vérifié en réel (2026-08-06)
 - Notifie l'ÉQUIPE INTERNE (Telegram, `notify` déjà construit), jamais le client
