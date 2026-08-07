@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -511,6 +512,33 @@ func (d *daemonRunner) InvokeTool(ctx context.Context, name string, input map[st
 	}
 	runner := &tools.Runner{Stderr: os.Stderr}
 	return runner.Invoke(ctx, sk, input)
+}
+
+// Upload saves an uploaded document under cfg.UploadDir and returns its local path — the
+// same "text IS the document path" convention a chat command or courtage-extraction's
+// Telegram listener already dispatch with, just a third real way for that path to exist
+// on disk. filepath.Base strips any directory component the client sent (a browser's
+// File.name can carry one on some platforms) — never trust a client-supplied path as
+// anything but a display name.
+func (d *daemonRunner) Upload(_ context.Context, filename string, content io.Reader) (string, error) {
+	if err := os.MkdirAll(d.cfg.UploadDir, 0o755); err != nil {
+		return "", fmt.Errorf("upload: create %q: %w", d.cfg.UploadDir, err)
+	}
+	safeName := filepath.Base(filename)
+	if safeName == "." || safeName == "/" || safeName == "" {
+		safeName = "document"
+	}
+	dest := filepath.Join(d.cfg.UploadDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), safeName))
+
+	f, err := os.Create(dest)
+	if err != nil {
+		return "", fmt.Errorf("upload: create %q: %w", dest, err)
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, content); err != nil {
+		return "", fmt.Errorf("upload: write %q: %w", dest, err)
+	}
+	return dest, nil
 }
 
 // toolSpec translates a skills.Skill into the narrower shape a tool caller needs — the

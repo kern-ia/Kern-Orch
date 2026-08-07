@@ -43,6 +43,11 @@ const (
 	// references it fails loud rather than dropping messages silently.
 	EnvTelegramBotToken = "KERN_TELEGRAM_BOT_TOKEN"
 	EnvTelegramChatID   = "KERN_TELEGRAM_CHAT_ID"
+
+	// EnvUploadDir is where POST /api/v1/uploads saves a document — the UI-upload
+	// ingestion channel, same "text IS the document path" convention as a chat command or
+	// courtage-extraction's Telegram listener already use.
+	EnvUploadDir = "KERN_ORCH_UPLOAD_DIR"
 )
 
 // Config is the resolved runtime configuration.
@@ -68,6 +73,9 @@ type Config struct {
 	// empty leaves it unconfigured.
 	TelegramBotToken string
 	TelegramChatID   string
+
+	// UploadDir is where an uploaded document is saved.
+	UploadDir string
 }
 
 // FromEnv builds a Config from the environment, applying defaults for unset variables.
@@ -84,6 +92,7 @@ func FromEnv() Config {
 		ServeToken:        os.Getenv(EnvServeToken),
 		TelegramBotToken:  os.Getenv(EnvTelegramBotToken),
 		TelegramChatID:    os.Getenv(EnvTelegramChatID),
+		UploadDir:         envOr(EnvUploadDir, "./data/uploads"),
 	}
 }
 

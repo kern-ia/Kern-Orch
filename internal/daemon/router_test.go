@@ -60,6 +60,10 @@ type fakeRunner struct {
 	dispatchUnknownSkill *UnknownSkillError
 	dispatchResult       DispatchResult
 	dispatchErr          error
+
+	uploaded   []uploadCall
+	uploadPath string
+	uploadErr  error
 }
 
 type invocation struct {
