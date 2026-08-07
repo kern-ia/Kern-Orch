@@ -79,14 +79,22 @@ repli sûr, configuré = vrai appel.
   construire ce skill) : le code existe et est testé (appel HTTP mocké), mais aucun appel
   réel n'a encore été fait. À vérifier dès qu'une clé est disponible.
 
-## Limite connue : pas de détection de nom de personne
+## Détection de noms propres (optionnelle, build `-tags onnx`)
 
-`kern-anon` détecte les entités par motif (IBAN, IBAN, téléphone FR, email, NIR,
-SIREN/SIRET, carte bancaire...) — aucun moteur NLP n'est branché (pas de modèle ONNX
-chargé), donc un nom propre en texte libre ("Jean Dupont") n'est PAS masqué. Les champs
-structurés à motif fixe (coordonnées bancaires, identifiants, contacts) le sont. À
-documenter clairement au client : ce n'est pas un masquage complet de toute PII, c'est un
-masquage des données à motif reconnaissable.
+`kern-anon` masque par défaut les entités à motif fixe (IBAN, téléphone FR, email, NIR,
+SIREN/SIRET, carte bancaire...). La détection de noms de personnes en texte libre ("Jean
+Dupont") existe en plus, via un moteur NER ONNX (BERT multilingue) — **désactivée par
+défaut**, activée seulement si le binaire est compilé avec `-tags onnx`
+(`CGO_ENABLED=1`) ET que `KERN_ANON_NER_MODEL_DIR` pointe vers un modèle téléchargé
+(`Kern-Anon/scripts/download-model-macos.sh`). Sans l'un des deux : comportement
+inchangé, uniquement les entités à motif fixe.
+
+Lieux et organisations détectés par ce même moteur (une ville, le nom d'une banque
+partenaire) restent volontairement en clair — contexte métier utile à l'interprétation,
+pas du PII client à protéger. Seul le nom d'une personne est masqué.
+
+Le binaire par défaut (`go build ./...`, sans le tag) n'a ni dépendance cgo ni modèle à
+télécharger — l'ajout de la détection NER est strictement opt-in.
 
 ## Besoin #2 — Copilote de mémorandum
 

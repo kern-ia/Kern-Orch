@@ -7,6 +7,8 @@ import (
 
 	"github.com/YoLaub/PresidioGo/analyzer"
 	"github.com/YoLaub/PresidioGo/anonymizer"
+	"github.com/YoLaub/PresidioGo/pii"
+	"github.com/YoLaub/PresidioGo/recognizers/ner"
 	"github.com/YoLaub/PresidioGo/registry"
 	"github.com/yoann/kern-orch/internal/graph"
 )
@@ -29,6 +31,30 @@ var piiTokenLabels = map[string]string{
 	"MAC_ADDRESS":      "MAC",
 	"IP_ADDRESS":       "IP",
 	"URL":              "URL",
+	// PERSON only appears in results when nlpEngine() is non-nil (see
+	// courtage_ner_onnx.go/courtage_ner_noop.go) — kern-anon's regex recognizers alone
+	// cannot detect a name in free text, only structured patterns.
+	"PERSON": "PERSONNE",
+}
+
+// nerEntitiesToDrop are results the NER recognizer can produce that filterNerScope
+// excludes — LOCATION and ORGANIZATION are legitimate business context (a bank's name, a
+// client's town) the interpreting model still needs; "détection de noms propres" asked
+// for person identity, not every entity a general-purpose NER model happens to also tag.
+var nerEntitiesToDrop = map[string]bool{"LOCATION": true, "ORGANIZATION": true}
+
+// filterNerScope drops nerEntitiesToDrop from results. Regex-based entity types
+// (IBAN_CODE, EMAIL_ADDRESS, ...) are never affected — kern-anon's registry never emits
+// LOCATION/ORGANIZATION from a regex recognizer, only from NER.
+func filterNerScope(results []pii.Result) []pii.Result {
+	kept := make([]pii.Result, 0, len(results))
+	for _, r := range results {
+		if nerEntitiesToDrop[r.EntityType] {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept
 }
 
 // newMaskOperators builds one Custom operator per known entity type (plus a DEFAULT
@@ -74,14 +100,24 @@ func newAnonymizeTool(inputKey, textOutKey, mapOutKey string) func(context.Conte
 		}
 		text, _ := raw.(string)
 
-		eng, err := analyzer.New(analyzer.WithRegistry(registry.Default("fr")))
+		reg := registry.Default("fr")
+		opts := []analyzer.Option{analyzer.WithRegistry(reg), analyzer.WithDefaultLanguage("fr")}
+		// nlpEngine() is nil without -tags onnx or KERN_ANON_NER_MODEL_DIR (see
+		// courtage_ner_onnx.go/courtage_ner_noop.go) — the regex recognizers above still
+		// run either way, this only adds PERSON detection on top when available.
+		if eng := nlpEngine(); eng != nil {
+			reg.Add(ner.New("fr"))
+			opts = append(opts, analyzer.WithNlpEngine(eng))
+		}
+		analyzerEng, err := analyzer.New(opts...)
 		if err != nil {
 			return fmt.Errorf("courtage: initialisation de l'analyseur PII : %w", err)
 		}
-		results, err := eng.Analyze(ctx, text, analyzer.Language("fr"))
+		results, err := analyzerEng.Analyze(ctx, text, analyzer.Language("fr"))
 		if err != nil {
 			return fmt.Errorf("courtage: analyse PII : %w", err)
 		}
+		results = filterNerScope(results)
 
 		ops, tokenMap := newMaskOperators()
 		result, err := anonymizer.New().Anonymize(text, results, ops)

@@ -86,10 +86,14 @@ d'agents, superviseur central, bus Pub/Sub, mémoire partagée chiffrée.
   reste aussi câblé). Voir `docs/index/0034-courtage-telegram-ingestion.md`. Reste ouvert :
   **upload réel depuis l'UI** (route multipart, chantier cross-repo kern-orch + kern-ui,
   non commencé).
-- **Détection de noms propres absente** — `kern-anon` ne masque que des entités à motif
-  fixe (IBAN, téléphone FR, email, NIR, SIREN/SIRET, carte bancaire...), aucun moteur
-  NLP/ONNX n'est branché. Un nom en texte libre ("Jean Dupont") n'est pas masqué
-  aujourd'hui — documenté explicitement dans le SKILL.md du skill, pas un oubli silencieux.
+- ~~Détection de noms propres absente~~ — **fait le 2026-08-07** : `kern-anon` avait déjà
+  un moteur ONNX BERT-NER complet, jamais câblé ni testé — pas vraiment "bloqué sur de
+  l'externe" comme d'abord classé, juste non terminé. Câblé en Go côté Kern-Orch ET
+  kern-memory, opt-in (`-tags onnx` + `KERN_ANON_NER_MODEL_DIR`), vérifié en réel avec un
+  vrai modèle et un vrai dispatch de bout en bout. Voir
+  `docs/index/0035-courtage-ner-person.md` (Kern-Orch),
+  `kern-memory/docs/index/0004-anon-ner-person.md`, et
+  `Kern-Anon/scripts/download-model-macos.sh` pour la mise en place.
 
 ### Besoin #2 — Copilote de mémorandum : fait, vérifié en réel (2026-08-06)
 - Enchaîné dans le MÊME graphe/run que le besoin #1 (choix utilisateur : kern-orch n'a pas
