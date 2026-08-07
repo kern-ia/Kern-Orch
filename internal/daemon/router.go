@@ -93,6 +93,12 @@ type Runner interface {
 	// directly, an agent skill launches a new one-node run. Returns *UnknownSkillError
 	// when no skill of that name is loaded.
 	Dispatch(ctx context.Context, skill, text, requester string) (DispatchResult, error)
+
+	// Upload saves a document (filename plus its content) and returns the local path a
+	// caller then dispatches a skill with — the same "text IS the document path"
+	// convention courtage-extraction already uses for a chat command or a Telegram
+	// document.
+	Upload(ctx context.Context, filename string, content io.Reader) (path string, err error)
 }
 
 // NewRouter builds the daemon's HTTP handler. An empty token leaves every endpoint open,
@@ -113,6 +119,7 @@ func NewRouter(runner Runner, token string) http.Handler {
 	mux.HandleFunc("POST /api/v1/runs/{id}/nudge", s.auth(s.handleNudge))
 	mux.HandleFunc("POST /api/v1/runs/{id}/nodes/{node}/decide", s.auth(s.handleDecide))
 	mux.HandleFunc("POST /api/v1/dispatch", s.auth(s.handleDispatch))
+	mux.HandleFunc("POST /api/v1/uploads", s.auth(s.handleUpload))
 	return mux
 }
 
