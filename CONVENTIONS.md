@@ -1,79 +1,85 @@
 # CONVENTIONS.md — kern-orch
 
-Autorité locale pour ce repo, comme annoncé par le [CONTRIBUTING.md](https://github.com/kern-ia/.github/blob/main/CONTRIBUTING.md)
-de l'organisation. Les règles communes à tous les repos `kern-ia` sont reprises ci-dessous ;
-la section « Spécificités » couvre ce qui n'appartient qu'à `kern-orch`.
+Local authority for this repo, as announced by the org-wide
+[CONTRIBUTING.md](https://github.com/kern-ia/.github/blob/main/CONTRIBUTING.md). The rules
+shared by all `kern-ia` repos are restated below; the "Specifics" sections cover what belongs
+only to `kern-orch`.
+
+## Language
+
+Code, identifiers, and comments are written in English — no exceptions. This applies to
+source files, docstrings, commit diffs, and test names. Internal documentation such as this
+file, `README.md`, or `CLAUDE.md` stays in whatever language the team works in day to day.
 
 ## Branches
 
-- `main` : branche stable, toujours déployable. Protégée — aucun push direct.
-- `dev` : branche d'intégration. Protégée — aucun push direct.
-- Branches de travail : `feature/<slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>`, `test/<slug>`.
-- Toute modification de `main` ou `dev` passe par une Pull Request, jamais par un push direct
-  ni un `git merge` local suivi d'un push.
-- Merge vers `dev` : merge commit `--no-ff`.
+- `main`: stable branch, always deployable. Protected — no direct pushes.
+- `dev`: integration branch. Protected — no direct pushes.
+- Working branches: `feature/<slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>`, `test/<slug>`.
+- Any change to `main` or `dev` goes through a Pull Request, never a direct push or a local
+  `git merge` followed by a push.
+- Merging into `dev`: `--no-ff` merge commit.
 
-> **Écart actuel à corriger** : la branche par défaut du repo GitHub est aujourd'hui `dev`,
-> pas `main`. À changer dans Settings → Branches une fois `main` réellement à jour et protégée
-> (voir rapport de conformité).
+> **Current gap to fix**: the GitHub repo's default branch is `dev` today, not `main`. Change
+> it in Settings → Branches once `main` is genuinely current and protected (see the
+> compliance report).
 
 ## Commits
 
-Conventional Commits : `type(scope): résumé court`. Types déjà utilisés ici : `feat`, `fix`,
-`docs`, `test`, `chore`, `merge`. Le corps explique le *pourquoi*. Aucune signature d'outil
-(trailer `Co-Authored-By`, `Claude-Session` ou équivalent) dans les messages de commit —
-l'auteur du commit git suffit.
+Conventional Commits: `type(scope): short summary`. Types already used here: `feat`, `fix`,
+`docs`, `test`, `chore`, `merge`. The body explains the *why*. No tool signature
+(`Co-Authored-By`, `Claude-Session`, or equivalent trailer) in commit messages — the git
+author is enough.
 
 ## Pull Requests
 
-- Un seul sujet par PR, liée à l'issue ou la RFC qu'elle résout.
-- Template PR hérité de `kern-ia/.github`.
-- Déclare l'impact semver.
-- Aucune donnée personnelle réelle.
+- One subject per PR, linked to the issue or RFC it resolves.
+- PR template inherited from `kern-ia/.github`.
+- States the semver impact.
+- No real personal data.
 
-> **Écart actuel** : une seule PR GitHub existe sur ce repo (#1). Le flux réel est un
-> `git merge` local suivi d'un push direct sur `dev` — donc sans revue possible sur GitHub.
-> À corriger : tout changement doit désormais ouvrir une PR, même en solo, pour que la CI
-> (une fois en place) et l'historique de revue existent.
+> **Current gap**: only one GitHub PR exists on this repo (#1). The real flow is a local
+> `git merge` pushed straight to `dev` — so no review ever happens on GitHub. To fix: every
+> change now opens a PR, even solo, so CI (once in place) and a review history actually exist.
 
-## Style et lint
+## Style and lint
 
-- `go vet ./...` obligatoire.
-- Pas de `.golangci.yml` aujourd'hui — à ajouter, base `linters.default: standard`
-  (voir `kern-anon` ou `kern-link` comme référence).
+- `go vet ./...` is mandatory.
+- No `.golangci.yml` yet — add one, based on `linters.default: standard` (see `kern-anon` or
+  `kern-link` as a reference).
 
 ## Tests
 
-- `go test ./...` doit être vert avant toute PR.
-- Test unitaire ciblé : `go test ./internal/cmd/ -run <NomDuTest> -v`.
+- `go test ./...` must be green before any PR.
+- Targeted unit test: `go test ./internal/cmd/ -run <TestName> -v`.
 
-> **Écart actuel — le plus important** : ce repo n'a **aucun workflow GitHub Actions**.
-> Rien ne vérifie build/vet/test/lint à la PR. À ajouter en priorité : un `.github/workflows/ci.yml`
-> calqué sur celui de `kern-anon` (`go build`, `go test -race -cover ./...`, `golangci-lint`).
+> **Current gap — the most important one**: this repo has **no GitHub Actions workflow at
+> all**. Nothing checks build/vet/test/lint at PR time. Priority: add a
+> `.github/workflows/ci.yml` modeled on `kern-anon`'s (`go build`, `go test -race -cover ./...`,
+> `golangci-lint`).
 
-## Module Go
+## Go module
 
-- Chemin actuel : `github.com/yoann/kern-orch` — même écart que `kern-ui`, à trancher au
-  niveau de l'organisation plutôt que repo par repo.
+- Current path: `github.com/yoann/kern-orch` — same gap as `kern-ui`, a decision to make at
+  the org level rather than repo by repo.
 
 ## Architecture
 
-- Dépendances à sens unique : `graph` définit les ports (`AgentRunner`, `StepFunc`) ;
-  `agentrunner` et `checkpoint` dépendent de `graph`, jamais l'inverse. Toute PR qui inverse
-  ce sens doit être justifiée explicitement dans sa description.
-- Le protocole JSON-lines d'`agentrunner` est un placeholder assumé (spec §6.4) — ne pas le
-  durcir en API stable sans revoir la spec.
+- One-way dependencies: `graph` defines the ports (`AgentRunner`, `StepFunc`); `agentrunner`
+  and `checkpoint` depend on `graph`, never the reverse. Any PR that reverses this direction
+  must justify it explicitly in its description.
+- `agentrunner`'s JSON-lines protocol is an accepted placeholder (spec §6.4) — do not harden
+  it into a stable API without revisiting the spec.
 
 ## Documentation
 
-- `README.md` à la racine.
-- `CLAUDE.md` — contexte agent, section « Commands » à garder synchronisée avec les vraies
-  commandes du Makefile / CLI.
-- Index de features sous `docs/index/` (pattern OKF), à privilégier avant de relire tout le code.
-- Pas de `CHANGELOG.md` : notes de version dans le tag annoté (convention org).
+- `README.md` at the root.
+- `CLAUDE.md` — agent context; keep the "Commands" section synchronized with the actual
+  Makefile / CLI commands.
+- Feature index under `docs/index/` (OKF pattern), to consult before rereading all the code.
+- No `CHANGELOG.md`: release notes live in the annotated tag (org convention).
 
-## Sécurité / confidentialité
+## Security / privacy
 
-Voir `SECURITY.md` hérité de l'org. Aucune PII réelle dans le code, les fixtures ou les logs —
-particulièrement sensible ici puisque `kern-orch` orchestre des runs qui peuvent transporter
-du contenu utilisateur.
+See the org-inherited `SECURITY.md`. No real PII in code, fixtures, or logs — particularly
+sensitive here since `kern-orch` orchestrates runs that can carry user content.
