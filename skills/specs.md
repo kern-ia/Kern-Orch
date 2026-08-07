@@ -80,12 +80,11 @@ d'agents, superviseur central, bus Pub/Sub, mémoire partagée chiffrée.
 ### Reste à faire — besoin #1
 - **Vérifier le chemin Mistral OCR en conditions réelles** dès qu'une clé API est
   disponible (aujourd'hui : code écrit et testé, jamais exécuté pour de vrai).
-- **Ingestion documentaire réelle** — seul le canal chemin/dossier est câblé (le texte du
-  chat dispatch EST le chemin du fichier). Deux canaux voulus par l'utilisateur restent à
-  construire : upload réel depuis l'UI (route multipart, chantier cross-repo kern-orch +
-  kern-ui) et réception de documents via Telegram (le connecteur d'envoi existe déjà,
-  recevoir des fichiers est du code nouveau : `getUpdates`/webhook + téléchargement via
-  l'API Telegram).
+- ~~Ingestion documentaire réelle limitée au canal chemin/dossier~~ — **réception Telegram
+  faite le 2026-08-07** : `telegram_listener.py`, processus séparé (le canal chemin/dossier
+  reste aussi câblé). Voir `docs/index/0034-courtage-telegram-ingestion.md`. Reste ouvert :
+  **upload réel depuis l'UI** (route multipart, chantier cross-repo kern-orch + kern-ui,
+  non commencé).
 - **Détection de noms propres absente** — `kern-anon` ne masque que des entités à motif
   fixe (IBAN, téléphone FR, email, NIR, SIREN/SIRET, carte bancaire...), aucun moteur
   NLP/ONNX n'est branché. Un nom en texte libre ("Jean Dupont") n'est pas masqué

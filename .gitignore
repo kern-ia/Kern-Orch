@@ -20,3 +20,6 @@ coverage.*
 # OS
 .DS_Store
 __pycache__/
+
+# courtage-extraction Telegram ingestion — downloaded client documents, never committed
+skills/courtage-extraction/inbox/

@@ -13,9 +13,31 @@ manquantes) de l'agence de courtage (rachat de crédit), enchaînés dans le MÊ
 
 Dispatché depuis le chat (`/courtage-extraction /chemin/vers/dossier.pdf`) : le texte du
 message EST le chemin du document (`mailbox.Nudge("message", text)` côté kern-orch,
-mécanisme identique à `community-management-agency`). C'est le seul canal d'ingestion
-câblé pour l'instant — upload UI et réception Telegram sont des besoins séparés, non
-construits, consignés dans `specs.md`.
+mécanisme identique à `community-management-agency`).
+
+## Ingestion
+
+Deux canaux câblés :
+- **Chemin de fichier** — le texte du dispatch est directement le chemin local.
+- **Telegram** (`telegram_listener.py`, processus séparé, à lancer à côté de `kern-orch`) :
+  écoute réelle (`getUpdates`, long polling) sur le bot déjà configuré
+  (`TELEGRAM_BOT_TOKEN`). Un document reçu est téléchargé dans
+  `skills/courtage-extraction/inbox/` puis dispatché via la même API HTTP qu'un humain
+  tapant dans le chat (`POST /api/v1/dispatch`) — aucune nouvelle mécanique côté
+  `kern-orch`, juste un second vrai appelant de ce qui existe déjà. L'expéditeur reçoit une
+  confirmation (ou une erreur claire) dans la même conversation Telegram — légitime ici
+  car c'est lui qui a initié le contact (contrainte différente de la relance interne du
+  besoin #3, qui elle ne peut jamais contacter un client n'ayant jamais écrit au bot).
+  Dédoublonnage par `file_id` (fenêtre de 10 min) : un vrai doublon de livraison Telegram
+  observé en conditions réelles (même document, deux `update_id` ~10s d'écart, cause non
+  confirmée) a montré qu'il ne fallait pas supposer une livraison unique.
+  ```sh
+  TELEGRAM_BOT_TOKEN=... KERN_ORCH_URL=http://127.0.0.1:7070 KERN_ORCH_TOKEN=... \
+    python3 skills/courtage-extraction/telegram_listener.py
+  ```
+
+Upload direct depuis l'UI (route multipart) reste un besoin séparé, non construit —
+chantier cross-repo kern-orch + kern-ui, consigné dans `specs.md`.
 
 ## Pipeline
 
