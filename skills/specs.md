@@ -83,9 +83,11 @@ d'agents, superviseur central, bus Pub/Sub, mémoire partagée chiffrée.
   disponible (aujourd'hui : code écrit et testé, jamais exécuté pour de vrai).
 - ~~Ingestion documentaire réelle limitée au canal chemin/dossier~~ — **réception Telegram
   faite le 2026-08-07** : `telegram_listener.py`, processus séparé (le canal chemin/dossier
-  reste aussi câblé). Voir `docs/index/0034-courtage-telegram-ingestion.md`. Reste ouvert :
-  **upload réel depuis l'UI** (route multipart, chantier cross-repo kern-orch + kern-ui,
-  non commencé).
+  reste aussi câblé). Voir `docs/index/0034-courtage-telegram-ingestion.md`. **Upload UI
+  fait le 2026-08-07** : `POST /api/v1/uploads` (kern-orch) + icône 📎 dans le chat
+  (Kern-UI), voir `docs/index/0036-courtage-upload-backend.md` et
+  `Kern-UI/docs/index/upload-ui.md`. Les trois canaux d'ingestion voulus par
+  l'utilisateur sont maintenant tous construits.
 - ~~Détection de noms propres absente~~ — **fait le 2026-08-07** : `kern-anon` avait déjà
   un moteur ONNX BERT-NER complet, jamais câblé ni testé — pas vraiment "bloqué sur de
   l'externe" comme d'abord classé, juste non terminé. Câblé en Go côté Kern-Orch ET

@@ -36,8 +36,10 @@ Deux canaux câblés :
     python3 skills/courtage-extraction/telegram_listener.py
   ```
 
-Upload direct depuis l'UI (route multipart) reste un besoin séparé, non construit —
-chantier cross-repo kern-orch + kern-ui, consigné dans `specs.md`.
+Upload direct depuis l'UI de Kern-UI (icône 📎 dans le chat, n'importe quel skill
+dispatché) : le fichier est uploadé via `POST /api/v1/uploads` puis le chemin retourné
+devient le texte du dispatch, même convention que les deux canaux ci-dessus. Voir
+`Kern-UI/docs/index/upload-ui.md`.
 
 ## Pipeline
 
