@@ -33,15 +33,16 @@ brique.
   API n'acceptent pas de texte seul, il faut une image/vidéo. Bloqué tant qu'une brique de
   génération d'image n'existe pas (piste : `kern-image`, ou skill appelant un service
   tiers type Higgsfield / GPT-image — aucun des deux construit).
-- **Historique du calendrier marketing en mémoire seulement** — perdu au redémarrage de
-  kern-ui. Pas de brique de stockage persistant construite cette session (choix explicite,
-  pas un oubli).
+- ~~Historique du calendrier marketing en mémoire seulement~~ — **fait le 2026-08-07** :
+  persisté dans `kern-memory` (couche `.okf`, tag `marketing`), vérifié par un vrai
+  redémarrage de kern-ui. Voir `Kern-UI/docs/index/marketing-persistence.md`.
 - **Pas de republication depuis l'édition** — le panneau du calendrier permet de corriger
   et copier, jamais de renvoyer réellement le texte édité. Choix explicite de l'utilisateur
   (2026-08-06), à rouvrir si le besoin change.
-- **Mode auto sans écran de confirmation dédié** — l'avertissement vit dans la fiche du
-  skill (visible au moment de le choisir dans le Grimoire), pas dans une vraie modale de
-  garde avant activation dans l'interface.
+- ~~Mode auto sans écran de confirmation dédié~~ — **fait le 2026-08-07** : une commande
+  `/skill-name-auto` ouvre une vraie modale de garde avant dispatch (détection générique
+  par convention de nommage, pas juste ce skill). Voir
+  `Kern-UI/docs/index/auto-mode-confirmation.md`.
 - **Détection de canal fragile aux variations de phrasé du modèle** — repose sur la ligne
   "Plateforme(s) :" du brief ; déjà cassée une fois en réel par un phrasé légèrement
   différent ("Plateforme :" sans le "(s)"), corrigée mais reste un point de fragilité
